@@ -1,0 +1,13 @@
+[package]
+name = "simple_alloc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+spin = "0.10.0"
+
+[features]
+default = ["bump_alloc", "linked_list_alloc", "buddy_alloc"]
+bump_alloc = []
+linked_list_alloc = []
+buddy_alloc = []
