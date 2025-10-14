@@ -99,6 +99,7 @@ impl BuddyAlloc {
     }
 
     pub fn init(&mut self, start: usize, size: usize) {
+        assert!(start != 0, "Given start for heap is NULL.");
         assert!(
             size.is_power_of_two(),
             "Buddy Allocator heap not a power of two."
@@ -120,6 +121,7 @@ impl BuddyAlloc {
     /// # Safety
     /// TESTING
     pub unsafe fn add_free_area(&mut self, addr: usize, order: usize) {
+        assert!(addr != 0, "Given free area has a NULL address pointer.");
         assert_eq!(align_up(addr, align_of::<FreeList>()), addr);
 
         let mut new_item = FreeList::new();
@@ -134,6 +136,10 @@ impl BuddyAlloc {
         }
     }
 
+    /*
+     * I am lazy to make proper errors as the error would either cause a panic
+     * or return error if there is no more space left.
+     */
     #[allow(clippy::result_unit_err)]
     pub fn split_area(&mut self, target_order: usize) -> Result<(), ()> {
         let source_order = (target_order..NR_MAX_ORDER)
@@ -147,7 +153,9 @@ impl BuddyAlloc {
                 }
                 let area = self.list_areas[current_order].pop().ok_or(())?;
 
-                let buddy_order = current_order - 1;
+                let buddy_order = current_order
+                    .checked_sub(1) // This should normally never underflow but checking just in case.
+                    .expect("Calculating buddy_order has underflowed the usize");
                 let block_size = PAGE_SIZE << buddy_order;
 
                 unsafe {
@@ -202,7 +210,7 @@ impl BuddyAlloc {
 
         assert!(
             size_in_pages.ilog2() <= MAX_ORDER as u32,
-            "Object is too large to allocate in a single block."
+            "Object is too large to allocate preset largest single block ((2^16)*16 = 1048576 bytes) in this allocator."
         );
 
         return size_in_pages;
