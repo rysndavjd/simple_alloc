@@ -7,6 +7,27 @@ use core::{
 
 use crate::{Locked, common::align_up};
 
+#[repr(align(8))]
+pub struct BuddyHeap<const S: usize>(pub [MaybeUninit<u8>; S]);
+
+impl<const S: usize> BuddyHeap<S> {
+    /// Constructs a [`LinkedListHeap`] with given size `S`
+    pub const fn new() -> BuddyHeap<S> {
+        assert!(S > 0, "Buddy heap cannot be zero in size.");
+        assert!(
+            S.is_power_of_two(),
+            "Buddy Allocator heap not a power of two."
+        );
+        BuddyHeap([MaybeUninit::uninit(); S])
+    }
+}
+
+impl<const S: usize> Default for BuddyHeap<S> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 pub struct FreeList {
     pub next: Option<NonNull<FreeList>>,
@@ -58,8 +79,8 @@ impl FreeArea {
     }
 }
 
-pub const PAGE_SIZE: usize = 16;
-pub const MIN_ORDER: usize = 1;
+pub const PAGE_SIZE: usize = 8;
+pub const MIN_ORDER: usize = 0;
 pub const MAX_ORDER: usize = 16;
 pub const NR_MAX_ORDER: usize = MAX_ORDER + 1;
 
@@ -99,8 +120,33 @@ impl BuddyAlloc {
         }
     }
 
-    pub fn init(&mut self, start: usize, size: usize) {
+    /// Initializes the buddy allocator with the given heap bounds via a [`BuddyHeap`].
+    ///
+    /// # Safety
+    /// - Must be called only once.
+    /// - `HEAP_SIZE` must be greater than 0.
+    pub unsafe fn init<const S: usize>(&mut self, heap: *mut BuddyHeap<S>) {
+        let start = unsafe { &raw mut (*heap).0 };
+        self.base = start as *mut u8;
+        self.size = S;
+
+        unsafe {
+            self.add_free_area(start as usize, S.div_ceil(PAGE_SIZE).ilog2() as usize);
+        }
+    }
+
+    /// Initializes the buddy allocator with the given heap bounds.
+    ///
+    /// # Safety
+    /// - Must be called only once.
+    /// - The heap must be 8 byte aligned.    
+    /// - `start` must be valid memory address (NON-NULL).
+    /// - `size` must be greater than 0.
+    /// - `start + size` must not overflow.
+    /// - The caller must ensure exclusive access to provided memory region for the lifetime of the allocator.
+    pub unsafe fn init_with_ptr(&mut self, start: usize, size: usize) {
         assert!(start != 0, "Given start for heap is NULL.");
+        assert!(size > 0, "Buddy heap cannot be zero in size.");
         assert!(
             size.is_power_of_two(),
             "Buddy Allocator heap not a power of two."
@@ -171,12 +217,12 @@ impl BuddyAlloc {
         return Err(());
     }
 
-    pub fn combine_free_buddies(&mut self, addr: usize, order: usize) {
-        for current_order in MIN_ORDER..=order {
+    pub fn combine_free_buddies(&mut self, addr: usize) {
+        for current_order in MIN_ORDER..=MAX_ORDER {
             let buddy_addr = addr ^ (PAGE_SIZE << current_order);
 
-            if (buddy_addr ^ addr) == (PAGE_SIZE << current_order) 
-                && self.list_areas[current_order].nr_free >= 2 
+            if (buddy_addr ^ addr) == (PAGE_SIZE << current_order)
+                && self.list_areas[current_order].nr_free >= 2
             {
                 let new_addr = addr.min(buddy_addr);
                 self.list_areas[current_order].head = None;
@@ -185,7 +231,7 @@ impl BuddyAlloc {
                 let node_ptr = new_addr as *mut FreeList;
                 unsafe {
                     node_ptr.write_volatile(FreeList::new());
-                    self.list_areas[current_order+1].push(NonNull::new_unchecked(node_ptr));
+                    self.list_areas[current_order + 1].push(NonNull::new_unchecked(node_ptr));
                 }
             }
         }
@@ -252,6 +298,6 @@ unsafe impl GlobalAlloc for Locked<BuddyAlloc> {
         let dealloc_order = size.ilog2() as usize;
 
         unsafe { allocator.add_free_area(ptr as usize, dealloc_order) };
-        allocator.combine_free_buddies(ptr as usize, dealloc_order);
+        allocator.combine_free_buddies(ptr as usize);
     }
 }

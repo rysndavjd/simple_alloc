@@ -15,6 +15,7 @@ pub struct LinkedListHeap<const S: usize>(pub [MaybeUninit<u8>; S]);
 impl<const S: usize> LinkedListHeap<S> {
     /// Constructs a [`LinkedListHeap`] with given size `S`
     pub const fn new() -> LinkedListHeap<S> {
+        assert!(S > 0, "Linked list heap cannot be zero in size.");
         LinkedListHeap([MaybeUninit::uninit(); S])
     }
 }
@@ -69,7 +70,7 @@ impl LinkedListAlloc {
     /// - Must be called only once.
     /// - The provided heap must have at least 8 bytes available per allocation
     ///   to store linked list metadata.
-    /// - `heap_size` must be greater than 0.
+    /// - `HEAP_SIZE` must be greater than 0.
     pub unsafe fn init<const HEAP_SIZE: usize>(&mut self, heap: *mut LinkedListHeap<HEAP_SIZE>) {
         unsafe {
             self.add_free_region(&raw mut (*heap).0 as usize, HEAP_SIZE);
@@ -88,6 +89,7 @@ impl LinkedListAlloc {
     /// - `heap_start + heap_size` must not overflow.
     /// - The caller must ensure exclusive access to provided memory region for the lifetime of the allocator.
     pub unsafe fn init_with_ptr(&mut self, heap_start: usize, heap_size: usize) {
+        assert!(heap_size > 0, "Linked list heap cannot be zero in size.");
         assert_eq!(
             align_up(heap_start, align_of::<Node>()),
             heap_start,

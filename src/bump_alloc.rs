@@ -14,6 +14,7 @@ pub struct BumpHeap<const S: usize>(pub [MaybeUninit<u8>; S]);
 impl<const S: usize> BumpHeap<S> {
     /// Constructs a [`BumpHeap`] with given size `S`
     pub const fn new() -> BumpHeap<S> {
+        assert!(S > 0, "Bump heap cannot be zero in size.");
         BumpHeap([MaybeUninit::uninit(); S])
     }
 }

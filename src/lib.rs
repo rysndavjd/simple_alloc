@@ -12,7 +12,7 @@ mod linked_list_alloc;
 mod tests;
 
 #[cfg(feature = "buddy_alloc")]
-pub use buddy_alloc::BuddyAlloc;
+pub use buddy_alloc::{BuddyAlloc, BuddyHeap};
 #[cfg(feature = "bump_alloc")]
 pub use bump_alloc::{BumpAlloc, BumpHeap};
 pub use common::Locked;
