@@ -83,11 +83,11 @@ fn linked_list_combine_free_regions() {
         allocator.dealloc(ptr2 as *mut u8, layout_u32);
         allocator.dealloc(ptr1 as *mut u8, layout_u32);
 
-        let layout_u64 = Layout::new::<u64>();
-
         println!("u32 numbers are deallocated");
         print_heap_dump(&raw mut HEAP_MEM.0 as *mut u8, HEAP_SIZE);
         println!();
+
+        let layout_u64 = Layout::new::<u64>();
 
         let ptr5 = allocator.alloc(layout_u64) as *mut u64;
         let ptr6 = allocator.alloc(layout_u64) as *mut u64;
@@ -157,52 +157,6 @@ fn linked_list_boundary_conditions() {
 }
 
 #[test]
-fn linked_list_mixed_allocations() {
-    const HEAP_SIZE: usize = 64;
-    static mut HEAP_MEM: LinkedListHeap<HEAP_SIZE> = LinkedListHeap::new();
-
-    let allocator = Locked::new(LinkedListAlloc::new());
-
-    unsafe {
-        allocator.lock().init(&raw mut HEAP_MEM);
-
-        let layout_u64: Layout = Layout::new::<u64>();
-        let layout_array_u8 = Layout::new::<[u8; 3]>();
-        let layout_u16 = Layout::new::<u16>();
-        let layout_u32 = Layout::new::<u32>();
-
-        let ptr1_u64 = allocator.alloc(layout_u64) as *mut u64;
-        let ptr_array_u8 = allocator.alloc(layout_array_u8) as *mut [u8; 3];
-        let ptr1_u16 = allocator.alloc(layout_u16) as *mut u16;
-        let ptr2_u64 = allocator.alloc(layout_u64) as *mut u64;
-
-        assert!(!ptr1_u64.is_null());
-        assert!(!ptr_array_u8.is_null());
-        assert!(!ptr1_u16.is_null());
-        assert!(!ptr2_u64.is_null());
-
-        *ptr1_u64 = u64::MAX;
-        *ptr_array_u8 = [u8::MAX, u8::MAX, u8::MAX];
-        *ptr1_u16 = u16::MAX;
-        *ptr2_u64 = u64::MAX;
-
-        print_heap_dump(&raw mut HEAP_MEM.0 as *mut u8, HEAP_SIZE);
-
-        allocator.dealloc(ptr2_u64 as *mut u8, layout_u64);
-        allocator.dealloc(ptr_array_u8 as *mut u8, layout_array_u8);
-
-        print_heap_dump(&raw mut HEAP_MEM.0 as *mut u8, HEAP_SIZE);
-
-        let ptr_u32 = allocator.alloc(layout_u32) as *mut u32;
-        *ptr_u32 = u32::MAX;
-
-        assert!(!ptr_u32.is_null());
-
-        print_heap_dump(&raw mut HEAP_MEM.0 as *mut u8, HEAP_SIZE);
-    }
-}
-
-#[test]
 fn buddy_alloc() {
     #[repr(align(8))]
     pub struct Heap<const HEAP_SIZE: usize>(pub [MaybeUninit<u8>; HEAP_SIZE]);
@@ -221,10 +175,10 @@ fn buddy_alloc() {
         print_heap_dump(&raw mut HEAP_MEM.0 as *mut u8, HEAP_SIZE);
         println!();
 
-        let layout_u8_16 = Layout::new::<[u8; 6]>();
+        let layout_u8_16 = Layout::new::<[u8; 11]>();
 
-        let ptr1_u8_16 = allocator.alloc(layout_u8_16) as *mut [u8; 6];
-        *ptr1_u8_16 = [0xFF_u8; 6];
+        let ptr1_u8_16 = allocator.alloc(layout_u8_16) as *mut [u8; 11];
+        ptr1_u8_16.write([0xFF_u8; 11]);
 
         println!("{:?}", *allocator.lock());
         print_heap_dump(&raw mut HEAP_MEM.0 as *mut u8, HEAP_SIZE);

@@ -87,7 +87,7 @@ pub const NR_MAX_ORDER: usize = MAX_ORDER + 1;
 pub struct BuddyAlloc {
     base: *mut u8,
     size: usize,
-    pub list_areas: [FreeArea; NR_MAX_ORDER],
+    list_areas: [FreeArea; NR_MAX_ORDER],
 }
 
 impl Debug for BuddyAlloc {
@@ -109,7 +109,7 @@ impl Default for BuddyAlloc {
     }
 }
 
-// TODO: unsafe impl Send for BuddyAlloc {}
+unsafe impl Send for BuddyAlloc {}
 
 impl BuddyAlloc {
     pub const fn new() -> BuddyAlloc {
@@ -165,10 +165,8 @@ impl BuddyAlloc {
         }
     }
 
-    /// # Safety
-    /// TESTING
-    pub unsafe fn add_free_area(&mut self, addr: usize, order: usize) {
-        assert!(addr != 0, "Given free area has a NULL address pointer.");
+    unsafe fn add_free_area(&mut self, addr: usize, order: usize) {
+        debug_assert!(addr != 0, "add_free_area: Given free area has a NULL address pointer.");
         assert_eq!(align_up(addr, align_of::<FreeList>()), addr);
 
         let mut new_item = FreeList::new();
@@ -185,10 +183,10 @@ impl BuddyAlloc {
 
     /*
      * I am lazy to make proper errors as the error would either cause a panic
-     * or return error if there is no more space left.
+     * or return if there is no more memory left.
      */
     #[allow(clippy::result_unit_err)]
-    pub fn split_area_to(&mut self, target_order: usize) -> Result<(), ()> {
+    fn split_area_to(&mut self, target_order: usize) -> Result<(), ()> {
         let source_order = (target_order..NR_MAX_ORDER)
             .find(|&order| self.list_areas[order].nr_free > 0)
             .ok_or(())?;
@@ -217,7 +215,8 @@ impl BuddyAlloc {
         return Err(());
     }
 
-    pub fn combine_free_buddies(&mut self, addr: usize) {
+    fn combine_free_buddies(&mut self, addr: usize) {
+        debug_assert!(addr != 0, "combine_free_buddies: Given address is NULL");
         for current_order in MIN_ORDER..=MAX_ORDER {
             let buddy_addr = addr ^ (PAGE_SIZE << current_order);
 
@@ -240,7 +239,7 @@ impl BuddyAlloc {
     }
 
     fn push_to_order(&mut self, order: usize, addr: usize) {
-        assert!(addr != 0, "Given address is NULL.");
+        debug_assert!(addr != 0, "push_to_order: Given address is NULL.");
         let node_ptr = addr as *mut FreeList;
 
         unsafe {
@@ -260,7 +259,7 @@ impl BuddyAlloc {
 
         assert!(
             size_in_pages.ilog2() <= MAX_ORDER as u32,
-            "Object is too large to allocate in set largest single block ((2^16)*16 = 1048576 bytes) in this allocator."
+            "Object is too large to allocate in set largest single block in this allocator."
         );
 
         return size_in_pages;
@@ -275,14 +274,12 @@ unsafe impl GlobalAlloc for Locked<BuddyAlloc> {
         let alloc_order = size.ilog2() as usize;
 
         if allocator.split_area_to(alloc_order).is_err() {
-            eprintln!("split area null");
             return null_mut();
         };
 
         let region = match allocator.list_areas[alloc_order].pop() {
             Some(f) => f,
             None => {
-                eprintln!("region null");
                 return null_mut();
             }
         };

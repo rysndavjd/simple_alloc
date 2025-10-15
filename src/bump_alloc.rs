@@ -39,7 +39,7 @@ impl Default for BumpAlloc {
     }
 }
 
-// TODO: unsafe impl Send for BumpAlloc {}
+unsafe impl Send for BumpAlloc {}
 
 impl BumpAlloc {
     pub const fn new() -> Self {
@@ -57,7 +57,6 @@ impl BumpAlloc {
     /// - Must be called only once.
     /// - `heap_size` must be greater than 0.
     pub unsafe fn init<const HEAP_SIZE: usize>(&mut self, heap: *mut BumpHeap<HEAP_SIZE>) {
-        assert!(HEAP_SIZE > 0, "Heap cannot be 0 in size");
         let start = unsafe { &raw mut (*heap).0 as usize };
         self.start = start;
         self.end = start

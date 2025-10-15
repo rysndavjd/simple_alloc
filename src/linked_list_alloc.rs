@@ -56,7 +56,7 @@ impl Default for LinkedListAlloc {
     }
 }
 
-// TODO: unsafe impl Send for LinkedListAlloc {}
+unsafe impl Send for LinkedListAlloc {}
 
 impl LinkedListAlloc {
     /// Creates a new empty [`LinkedListAlloc`]
