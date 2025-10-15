@@ -59,6 +59,7 @@ impl FreeArea {
 }
 
 pub const PAGE_SIZE: usize = 16;
+pub const MIN_ORDER: usize = 1;
 pub const MAX_ORDER: usize = 16;
 pub const NR_MAX_ORDER: usize = MAX_ORDER + 1;
 
@@ -141,7 +142,7 @@ impl BuddyAlloc {
      * or return error if there is no more space left.
      */
     #[allow(clippy::result_unit_err)]
-    pub fn split_area(&mut self, target_order: usize) -> Result<(), ()> {
+    pub fn split_area_to(&mut self, target_order: usize) -> Result<(), ()> {
         let source_order = (target_order..NR_MAX_ORDER)
             .find(|&order| self.list_areas[order].nr_free > 0)
             .ok_or(())?;
@@ -170,32 +171,35 @@ impl BuddyAlloc {
         return Err(());
     }
 
-    pub fn combine_free_buddies(&mut self, addr: usize, mut order: usize) {
-        println!("addr: {addr:x}");
-        for current_order in order..=MAX_ORDER {
+    pub fn combine_free_buddies(&mut self, addr: usize, order: usize) {
+        for current_order in MIN_ORDER..=order {
             let buddy_addr = addr ^ (PAGE_SIZE << current_order);
 
-            if (buddy_addr ^ addr) == (PAGE_SIZE << order) {
-                todo!();
-                return;
+            if (buddy_addr ^ addr) == (PAGE_SIZE << current_order) 
+                && self.list_areas[current_order].nr_free >= 2 
+            {
+                let new_addr = addr.min(buddy_addr);
+                self.list_areas[current_order].head = None;
+                self.list_areas[current_order].nr_free = 0;
+
+                let node_ptr = new_addr as *mut FreeList;
+                unsafe {
+                    node_ptr.write_volatile(FreeList::new());
+                    self.list_areas[current_order+1].push(NonNull::new_unchecked(node_ptr));
+                }
             }
         }
-        todo!();
-        // while order < MAX_ORDER {
-        //     let buddy_addr = addr ^ (1 << order);
 
-        //     if self.list_areas[order].nr_free == 0 {
-        //         order += 1;
-        //     }
-        // }
+        return;
     }
 
     fn push_to_order(&mut self, order: usize, addr: usize) {
+        assert!(addr != 0, "Given address is NULL.");
         let node_ptr = addr as *mut FreeList;
 
         unsafe {
             node_ptr.write_volatile(FreeList::new());
-            self.list_areas[order].push(NonNull::new(node_ptr).expect("Should not be NULL"));
+            self.list_areas[order].push(NonNull::new_unchecked(node_ptr));
         }
     }
 
@@ -204,13 +208,13 @@ impl BuddyAlloc {
             .align_to(align_of::<FreeList>())
             .expect("adjusting alignment failed")
             .pad_to_align();
-        let size_bytes = new_layout.size().max(size_of::<FreeList>());
 
+        let size_bytes = new_layout.size().max(size_of::<FreeList>());
         let size_in_pages = size_bytes.div_ceil(PAGE_SIZE);
 
         assert!(
             size_in_pages.ilog2() <= MAX_ORDER as u32,
-            "Object is too large to allocate preset largest single block ((2^16)*16 = 1048576 bytes) in this allocator."
+            "Object is too large to allocate in set largest single block ((2^16)*16 = 1048576 bytes) in this allocator."
         );
 
         return size_in_pages;
@@ -224,15 +228,15 @@ unsafe impl GlobalAlloc for Locked<BuddyAlloc> {
 
         let alloc_order = size.ilog2() as usize;
 
-        if allocator.split_area(alloc_order).is_err() {
-            println!("split area null");
+        if allocator.split_area_to(alloc_order).is_err() {
+            eprintln!("split area null");
             return null_mut();
         };
 
         let region = match allocator.list_areas[alloc_order].pop() {
             Some(f) => f,
             None => {
-                println!("region null");
+                eprintln!("region null");
                 return null_mut();
             }
         };
