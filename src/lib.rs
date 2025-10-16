@@ -7,6 +7,8 @@ mod bump_alloc;
 mod common;
 #[cfg(feature = "linked_list_alloc")]
 mod linked_list_alloc;
+#[cfg(feature = "slab_alloc")]
+mod slab_alloc;
 
 #[cfg(test)]
 mod tests;
