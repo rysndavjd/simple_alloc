@@ -6,13 +6,13 @@ A collection of simple, pure Rust memory allocators for `no_std` and embedded en
 |------------------|--------|
 | [Bump Alloc](https://os.phil-opp.com/allocator-designs/#bump-allocator) | Works |
 | [Linked List Alloc](https://os.phil-opp.com/allocator-designs/#linked-list-allocator) | Works |
-| [Buddy Alloc](https://en.wikipedia.org/wiki/Buddy_memory_allocation) |  Inprogress | 
+| [Buddy Alloc](https://en.wikipedia.org/wiki/Buddy_memory_allocation) |  Works | 
 
 ### Status Definitions
 
 - **Inprogress**: Not fully implemented or finished.
-- **Works**: Functionally implemented, odd edge cases may occur.  
-- **Complete**: Fully implemented, including handling edge cases.
+- **Works**: Functionally implemented, not tested fully, odd edge cases may occur.  
+- **Complete**: Fully implemented and tested.
 
 ## Acknowledgments
 
