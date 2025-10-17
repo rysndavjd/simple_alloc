@@ -7,6 +7,8 @@ A collection of simple, pure Rust memory allocators for `no_std` and embedded en
 | [Bump Alloc](https://os.phil-opp.com/allocator-designs/#bump-allocator) | Works |
 | [Linked List Alloc](https://os.phil-opp.com/allocator-designs/#linked-list-allocator) | Works |
 | [Buddy Alloc](https://en.wikipedia.org/wiki/Buddy_memory_allocation) |  Works | 
+| [Buddy Alloc](https://en.wikipedia.org/wiki/Buddy_memory_allocation) |  Works | 
+| [Slab Alloc](https://en.wikipedia.org/wiki/Slab_allocation) | Inprogress |
 
 ### Status Definitions
 
