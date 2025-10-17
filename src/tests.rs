@@ -1,10 +1,11 @@
 extern crate alloc;
 
+use std::{thread, sync::Arc};
 use core::alloc::{GlobalAlloc, Layout};
 use core::mem::MaybeUninit;
 
-use crate::common::print_heap_dump;
-use crate::{BuddyAlloc, BumpAlloc, BumpHeap, LinkedListAlloc, LinkedListHeap, common::Locked};
+use crate::{bump_alloc::{BumpAlloc, BumpHeap, LocklessBumpAlloc}, 
+common::print_heap_dump, buddy_alloc::BuddyAlloc, linked_list_alloc::{LinkedListAlloc, LinkedListHeap}, common::Locked};
 
 #[test]
 fn bump_boundary_conditions() {
@@ -32,6 +33,61 @@ fn bump_boundary_conditions() {
         let ptr = allocator.alloc(layout);
         assert!(ptr.is_null());
     }
+}
+
+#[test]
+fn lockless_bump_boundary_conditions() {
+    const HEAP_SIZE: usize = 100;
+    static mut HEAP_MEM: BumpHeap<HEAP_SIZE> = BumpHeap::new();
+
+    let mut allocator = LocklessBumpAlloc::new();
+
+    unsafe {
+        allocator.init::<HEAP_SIZE>(&raw mut HEAP_MEM);
+
+        let layout = Layout::from_size_align(10, 1).unwrap();
+        let mut ptrs = Vec::new();
+
+        loop {
+            let ptr = allocator.alloc(layout);
+            if ptr.is_null() {
+                break;
+            }
+            ptrs.push(ptr);
+        }
+
+        assert!(!ptrs.is_empty());
+
+        let ptr = allocator.alloc(layout);
+        assert!(ptr.is_null());
+    }
+}
+
+#[test]
+fn lockless_bump_multi_thread() {
+    const HEAP_SIZE: usize = 1024;
+    static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
+
+    let mut temp = LocklessBumpAlloc::new();
+    unsafe { temp.init_with_ptr(&raw mut HEAP as usize, HEAP_SIZE) }
+
+    let allocator = Arc::new(temp);
+
+    let handles: Vec<_> = (0..4).map(|_| {
+        let alloc_ref = allocator.clone();
+        thread::spawn(move || {
+            for _ in 0..10 {
+                let layout = Layout::from_size_align(16, 8).unwrap();
+                let ptr = unsafe { alloc_ref.alloc(layout) };
+                assert!(!ptr.is_null());
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    assert!(allocator.allocations() == 40);
 }
 
 #[test]

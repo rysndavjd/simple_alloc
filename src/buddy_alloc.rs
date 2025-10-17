@@ -5,7 +5,7 @@ use core::{
     ptr::{NonNull, null_mut},
 };
 
-use crate::{Locked, common::align_up};
+use crate::common::{align_up, Locked};
 
 #[repr(align(8))]
 pub struct BuddyHeap<const S: usize>(pub [MaybeUninit<u8>; S]);

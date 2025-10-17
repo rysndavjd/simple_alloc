@@ -4,7 +4,7 @@ use core::{
     ptr::{null_mut, NonNull},
 };
 
-use crate::{Locked, common::align_up};
+use crate::common::{align_up, Locked};
 
 #[derive(Debug)]
 pub struct FreeList {
