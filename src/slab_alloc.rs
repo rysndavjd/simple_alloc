@@ -1,20 +1,23 @@
 use core::{
     alloc::{GlobalAlloc, Layout},
     mem::{MaybeUninit, align_of, size_of},
-    ptr::{null_mut, NonNull},
+    ptr::{NonNull, null_mut},
 };
 
-use crate::common::{align_up, Locked};
+use crate::common::{Locked, align_up};
 
 #[derive(Debug)]
 pub struct FreeList {
     pub next: Option<NonNull<FreeList>>,
-    pub prev: Option<NonNull<FreeList>>
+    pub prev: Option<NonNull<FreeList>>,
 }
 
 impl FreeList {
     const fn new() -> Self {
-        Self { next: None , prev: None }
+        Self {
+            next: None,
+            prev: None,
+        }
     }
 
     pub fn start_addr(&self) -> usize {
@@ -47,7 +50,7 @@ impl FreeArea {
             if let Some(mut head) = self.head {
                 head.as_mut().prev = Some(value)
             } else {
-                // Else the list is empty so this is first node  
+                // Else the list is empty so this is first node
                 // added so it becomes the tail of the list
                 self.tail = Some(value)
             }
@@ -79,4 +82,12 @@ impl FreeArea {
             None
         }
     }
+}
+
+const PAGE_SIZE: usize = 4096;
+
+pub struct SlabAlloc {
+    base: *mut u8,
+    size: usize,
+    slab_lists: usize,
 }

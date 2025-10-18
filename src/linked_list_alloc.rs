@@ -7,7 +7,7 @@ use core::{
     ptr::null_mut,
 };
 
-use crate::common::{align_up, Locked};
+use crate::common::{Locked, align_up};
 
 #[repr(align(8))]
 pub struct LinkedListHeap<const S: usize>(pub [MaybeUninit<u8>; S]);

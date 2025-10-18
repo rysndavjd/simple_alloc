@@ -1,4 +1,5 @@
 #![allow(clippy::needless_return)]
+#![allow(clippy::new_without_default)]
 
 #[cfg(feature = "buddy_alloc")]
 pub mod buddy_alloc;

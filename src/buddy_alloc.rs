@@ -5,13 +5,13 @@ use core::{
     ptr::{NonNull, null_mut},
 };
 
-use crate::common::{align_up, Locked};
+use crate::common::{Locked, align_up};
 
 #[repr(align(8))]
 pub struct BuddyHeap<const S: usize>(pub [MaybeUninit<u8>; S]);
 
 impl<const S: usize> BuddyHeap<S> {
-    /// Constructs a [`LinkedListHeap`] with given size `S`
+    /// Constructs a [`BuddyHeap`] with given size `S`
     pub const fn new() -> BuddyHeap<S> {
         assert!(S > 0, "Buddy heap cannot be zero in size.");
         assert!(
@@ -166,7 +166,10 @@ impl BuddyAlloc {
     }
 
     unsafe fn add_free_area(&mut self, addr: usize, order: usize) {
-        debug_assert!(addr != 0, "add_free_area: Given free area has a NULL address pointer.");
+        debug_assert!(
+            addr != 0,
+            "add_free_area: Given free area has a NULL address pointer."
+        );
         assert_eq!(align_up(addr, align_of::<FreeList>()), addr);
 
         let mut new_item = FreeList::new();

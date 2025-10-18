@@ -22,7 +22,7 @@ pub fn align_up(addr: usize, align: usize) -> usize {
 }
 
 /*
- * This function is marked unsafe as it could read uninitialized memory causing 
+ * This function is marked unsafe as it could read uninitialized memory causing
  * miri to get very mad and output a very long backtrace.
 */
 pub unsafe fn print_heap_dump(heap: *const u8, len: usize) {
