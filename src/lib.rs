@@ -1,5 +1,5 @@
-#![allow(clippy::needless_return)]
-#![allow(clippy::new_without_default)]
+#![allow(clippy::needless_return)] // I prefer specifying when a fn to return instead of the compiler trying to figure it out.
+#![allow(clippy::new_without_default)] // Annoying
 
 #[cfg(feature = "buddy_alloc")]
 pub mod buddy_alloc;
