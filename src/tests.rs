@@ -7,6 +7,7 @@ use crate::{
     buddy_alloc::BuddyAlloc,
     bump_alloc::{BumpAlloc, BumpHeap},
     common::{Locked, print_heap_dump},
+    const_bump_alloc::ConstBumpAlloc,
     linked_list_alloc::{LinkedListAlloc, LinkedListHeap},
 };
 
@@ -20,6 +21,30 @@ fn bump_boundary_conditions() {
     unsafe {
         allocator.lock().init::<HEAP_SIZE>(&raw mut HEAP_MEM);
 
+        let layout = Layout::from_size_align(10, 1).unwrap();
+        let mut ptrs = Vec::new();
+
+        loop {
+            let ptr = allocator.alloc(layout);
+            if ptr.is_null() {
+                break;
+            }
+            ptrs.push(ptr);
+        }
+
+        assert!(!ptrs.is_empty());
+
+        let ptr = allocator.alloc(layout);
+        assert!(ptr.is_null());
+    }
+}
+
+#[test]
+fn const_bump_boundary_conditions() {
+    const HEAP_SIZE: usize = 100;
+    let allocator = Locked::new(ConstBumpAlloc::<HEAP_SIZE>::new());
+
+    unsafe {
         let layout = Layout::from_size_align(10, 1).unwrap();
         let mut ptrs = Vec::new();
 

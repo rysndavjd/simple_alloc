@@ -1,13 +1,12 @@
 // Portions copyright (c) Philipp Oppermann (https://os.phil-opp.com/)
 // Licensed under MIT OR Apache-2.0
 
+use crate::common::{Locked, align_up};
 use core::{
     alloc::{GlobalAlloc, Layout},
     mem::MaybeUninit,
     ptr::null_mut,
 };
-
-use crate::common::{Locked, align_up};
 
 /// A fixed-size heap storage for use with [`BumpAlloc`].
 ///
@@ -27,9 +26,8 @@ impl<const S: usize> BumpHeap<S> {
     }
 }
 
-/// A allocator that provides memory allocation in a contiguous
-/// heap region. Memory is allocated linearly, and deallocation only resets
-/// the allocator when all allocations are freed.
+/// Simple bump allocator using external heap provided via a [`BumpHeap`] or a pointer, 
+/// initialized at runtime via [`BumpAlloc::init()`].
 #[derive(Debug)]
 pub struct BumpAlloc {
     start: usize,

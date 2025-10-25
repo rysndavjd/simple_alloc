@@ -5,11 +5,12 @@
 pub mod buddy_alloc;
 #[cfg(feature = "bump_alloc")]
 pub mod bump_alloc;
-mod common;
+pub mod common;
+#[cfg(feature = "const_bump_alloc")]
+pub mod const_bump_alloc;
 #[cfg(feature = "linked_list_alloc")]
 pub mod linked_list_alloc;
 #[cfg(feature = "slab_alloc")]
 pub mod slab_alloc;
-
 #[cfg(test)]
 mod tests;

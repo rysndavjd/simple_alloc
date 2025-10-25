@@ -7,8 +7,9 @@ edition = "2024"
 spin = "0.10.0"
 
 [features]
-default = ["bump_alloc", "linked_list_alloc", "buddy_alloc", "slab_alloc"]
+default = ["bump_alloc", "linked_list_alloc", "buddy_alloc", "slab_alloc", "const_bump_alloc"]
 bump_alloc = []
 linked_list_alloc = []
 buddy_alloc = []
 slab_alloc = []
+const_bump_alloc = []
