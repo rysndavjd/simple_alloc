@@ -1,7 +1,7 @@
 // Portions copyright (c) Philipp Oppermann (https://os.phil-opp.com/)
 // Licensed under MIT OR Apache-2.0
 
-use crate::common::{Locked, align_up};
+use crate::common::{Allocator, Locked, align_up, AllocatorError};
 use core::{
     alloc::{GlobalAlloc, Layout},
     mem::MaybeUninit,
@@ -95,31 +95,51 @@ impl BumpAlloc {
     }
 }
 
-unsafe impl GlobalAlloc for Locked<BumpAlloc> {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+unsafe impl Allocator for Locked<BumpAlloc> {
+    unsafe fn try_allocate(&self, layout: Layout) -> Result<*mut u8, AllocatorError> {
         let mut bump = self.lock();
 
         let alloc_start = align_up(bump.next, layout.align());
         let alloc_end = match alloc_start.checked_add(layout.size()) {
             Some(end) => end,
-            None => return null_mut(),
+            None => return Err(AllocatorError::Oom(layout)),
         };
 
         if alloc_end > bump.end {
-            null_mut()
+            return Err(AllocatorError::Oom(layout))
         } else {
             bump.next = alloc_end;
             bump.allocations += 1;
-            alloc_start as *mut u8
+            return Ok(alloc_start as *mut u8);
         }
     }
 
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
+    unsafe fn try_deallocate(&self, _ptr: *mut u8, _layout: Layout) -> Result<(), AllocatorError> {
         let mut bump = self.lock();
-
         bump.allocations -= 1;
         if bump.allocations == 0 {
             bump.next = bump.start;
+        }
+
+        return Ok(());
+    }
+}
+
+unsafe impl GlobalAlloc for Locked<BumpAlloc> {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        unsafe {
+            match self.try_allocate(layout) {
+                Ok(ptr) => return ptr,
+                Err(_) => return null_mut(),
+            }
+        }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe {
+            if let Err(e) = self.try_deallocate(ptr, layout) {
+                panic!("{e:?}");
+            };
         }
     }
 }

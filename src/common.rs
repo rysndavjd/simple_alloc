@@ -1,4 +1,5 @@
 use spin::{Mutex, MutexGuard};
+use core::{ptr::write_bytes, fmt::{Debug, Display, Result as FmtResult, Formatter}, alloc::{Layout, LayoutError}};
 
 pub struct Locked<A> {
     inner: Mutex<A>,
@@ -33,5 +34,51 @@ pub unsafe fn print_heap_dump(heap: *const u8, len: usize) {
             print!("{:02x} ", *heap.add(i));
         }
         println!();
+    }
+}
+
+pub enum AllocatorError {
+    Oom (Layout),
+    Alignment(Layout),
+    Layout(LayoutError),
+}
+
+impl Debug for AllocatorError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            AllocatorError::Oom(layout) => write!(f, "Out of Memory: layout: {layout:?}"),
+            AllocatorError::Alignment(layout) => write!(f, "Unable to satisfy alignment requirement: {layout:?}"),
+            AllocatorError::Layout(e) => write!(f, "Layout Error: {e:?}"),
+        }
+    }
+}
+
+/// # Safety
+pub unsafe trait Allocator {
+    /// # Safety
+    unsafe fn try_allocate(&self, layout: Layout) -> Result<*mut u8, AllocatorError>;
+
+    /// # Safety
+    unsafe fn try_deallocate(&self, ptr: *mut u8, layout: Layout) -> Result<(), AllocatorError>;
+
+    /// # Safety
+    unsafe fn try_allocate_zeroed(&self, layout: Layout) -> Result<*mut u8, AllocatorError> {
+        let size = layout.size();
+        let ptr = unsafe { self.try_allocate(layout)? };
+        if !ptr.is_null() {
+            unsafe { write_bytes(ptr, 0, size) };
+        } else {
+            return Err(AllocatorError::Oom(layout));
+        };
+        return Ok(ptr);
+    }
+
+    /// # Safety
+    unsafe fn try_deallocate_zeroed(&self, ptr: *mut u8, layout: Layout) -> Result<(), AllocatorError> {
+        unsafe {
+            write_bytes(ptr, 0, layout.size());
+            self.try_deallocate(ptr, layout)?;
+        };
+        return Ok(());
     }
 }
