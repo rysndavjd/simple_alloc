@@ -13,8 +13,6 @@ pub struct ConstBumpAlloc<const S: usize> {
     allocations: usize,
 }
 
-unsafe impl<const S: usize> Send for ConstBumpAlloc<S> {}
-
 impl<const S: usize> ConstBumpAlloc<S> {
     /// Creates a new [`ConstBumpAlloc`].
     pub const fn new() -> Self {

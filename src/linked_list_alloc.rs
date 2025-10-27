@@ -56,8 +56,6 @@ impl Default for LinkedListAlloc {
     }
 }
 
-unsafe impl Send for LinkedListAlloc {}
-
 impl LinkedListAlloc {
     /// Creates a new empty [`LinkedListAlloc`]
     pub const fn new() -> Self {

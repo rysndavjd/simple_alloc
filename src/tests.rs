@@ -5,7 +5,7 @@ use core::mem::MaybeUninit;
 
 use crate::{
     buddy_alloc::BuddyAlloc,
-    bump_alloc::{BumpAlloc, BumpHeap},
+    bump_alloc::BumpAlloc,
     common::{Locked, print_heap_dump},
     const_bump_alloc::ConstBumpAlloc,
     linked_list_alloc::{LinkedListAlloc, LinkedListHeap},
@@ -14,12 +14,12 @@ use crate::{
 #[test]
 fn bump_boundary_conditions() {
     const HEAP_SIZE: usize = 100;
-    static mut HEAP_MEM: BumpHeap<HEAP_SIZE> = BumpHeap::new();
+    static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
     let allocator = Locked::new(BumpAlloc::new());
 
     unsafe {
-        allocator.lock().init::<HEAP_SIZE>(&raw mut HEAP_MEM);
+        allocator.lock().init(&raw mut HEAP_MEM as usize, HEAP_SIZE);
 
         let layout = Layout::from_size_align(10, 1).unwrap();
         let mut ptrs = Vec::new();

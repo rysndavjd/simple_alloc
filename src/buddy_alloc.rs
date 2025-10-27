@@ -109,8 +109,6 @@ impl Default for BuddyAlloc {
     }
 }
 
-unsafe impl Send for BuddyAlloc {}
-
 impl BuddyAlloc {
     pub const fn new() -> BuddyAlloc {
         BuddyAlloc {
