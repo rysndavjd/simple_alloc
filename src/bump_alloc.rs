@@ -67,7 +67,7 @@ unsafe impl Allocator for Locked<BumpAlloc> {
         let alloc_start = align_up(bump.next, layout.align());
         let alloc_end = match alloc_start.checked_add(layout.size()) {
             Some(end) => end,
-            None => return Err(AllocatorError::Oom(layout)),
+            None => return Err(AllocatorError::Overflow),
         };
 
         if alloc_end > bump.end {
@@ -107,9 +107,8 @@ unsafe impl GlobalAlloc for Locked<BumpAlloc> {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         assert!(!ptr.is_null(), "Given pointer to deallocate is NULL.");
         unsafe {
-            if let Err(e) = self.try_deallocate(NonNull::new_unchecked(ptr), layout) {
-                panic!("{e:?}");
-            };
+            self.try_deallocate(NonNull::new_unchecked(ptr), layout)
+                .expect("Deallocation failed.")
         }
     }
 }

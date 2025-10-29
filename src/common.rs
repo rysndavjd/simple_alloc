@@ -44,6 +44,7 @@ pub unsafe fn print_heap_dump(heap: *const u8, len: usize) {
 
 pub enum AllocatorError {
     Oom(Layout),
+    Overflow,
     Alignment(Layout),
     Layout(LayoutError),
     Null,
@@ -53,6 +54,7 @@ impl Debug for AllocatorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             AllocatorError::Oom(layout) => write!(f, "Out of Memory: layout: {layout:?}"),
+            AllocatorError::Overflow => write!(f, "Overflowed memory allocator."),
             AllocatorError::Alignment(layout) => {
                 write!(f, "Unable to satisfy alignment requirement: {layout:?}")
             }

@@ -1,16 +1,17 @@
-use crate::common::{Locked, align_up};
+use crate::common::{Allocator, AllocatorError, align_up};
 use core::{
     alloc::{GlobalAlloc, Layout},
     mem::MaybeUninit,
-    ptr::null_mut,
+    ptr::{null_mut, NonNull},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 /// Simple bump allocator using internal heap, initialized at compile time.
 #[derive(Debug)]
 pub struct ConstBumpAlloc<const S: usize> {
     heap: [MaybeUninit<u8>; S],
-    offset: usize,
-    allocations: usize,
+    offset: AtomicUsize,
+    allocations: AtomicUsize,
 }
 
 impl<const S: usize> ConstBumpAlloc<S> {
@@ -18,8 +19,8 @@ impl<const S: usize> ConstBumpAlloc<S> {
     pub const fn new() -> Self {
         ConstBumpAlloc {
             heap: [MaybeUninit::<u8>::uninit(); S],
-            offset: 0,
-            allocations: 0,
+            offset: AtomicUsize::new(0),
+            allocations: AtomicUsize::new(0),
         }
     }
 
@@ -32,43 +33,63 @@ impl<const S: usize> ConstBumpAlloc<S> {
     }
 
     fn next(&self) -> usize {
-        return self.heap_start() + self.offset;
+        return self.offset.load(Ordering::SeqCst) + self.heap_start();
+    }
+
+    /// Resets the allocator, clearing all previous allocations.
+    ///
+    /// # Safety
+    /// Calling this function while any allocations are still active
+    /// may result in undefined behavior. Ensure that no active
+    /// allocations exist.
+    pub unsafe fn reset(&mut self) {
+        self.allocations.store(0, Ordering::SeqCst);
+        self.offset.store(0, Ordering::SeqCst);
     }
 
     /// Returns number of allocations currently being handled by the allocator.
     pub fn allocations(&self) -> usize {
-        return self.allocations;
+        return self.allocations.load(Ordering::SeqCst);
     }
 }
 
-unsafe impl<const S: usize> GlobalAlloc for Locked<ConstBumpAlloc<S>> {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let mut bump = self.lock();
-
-        let alloc_start = align_up(bump.next(), layout.align());
+unsafe impl<const S: usize> Allocator for ConstBumpAlloc<S> {
+    unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, AllocatorError> {
+        let alloc_start = align_up(self.next(), layout.align());
         let alloc_end = match alloc_start.checked_add(layout.size()) {
             Some(end) => end,
-            None => return null_mut(),
+            None => return Err(AllocatorError::Overflow),
         };
 
-        if alloc_end > bump.heap_end() {
-            null_mut()
+        if alloc_end > self.heap_end() {
+            return Err(AllocatorError::Oom(layout));
         } else {
-            bump.offset = match alloc_end.checked_sub(bump.heap_start()) {
+            self.offset.store(match alloc_end.checked_sub(self.heap_start()) {
                 Some(end) => end,
-                None => return null_mut(),
-            };
-            bump.allocations += 1;
-            alloc_start as *mut u8
+                None => return Err(AllocatorError::Overflow),
+            }, Ordering::SeqCst);
+            self.allocations.fetch_add(1, Ordering::SeqCst);
+            return NonNull::new(alloc_start as *mut u8).ok_or(AllocatorError::Null);
         }
     }
 
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
-        let mut bump = self.lock();
+    unsafe fn try_deallocate(&self, _ptr: NonNull<u8>, _layout: Layout)
+        -> Result<(), AllocatorError> {
+        return Ok(());
+    }
+}
 
-        bump.allocations -= 1;
-        if bump.allocations == 0 {
-            bump.offset = 0;
+unsafe impl<const S: usize> GlobalAlloc for ConstBumpAlloc<S> {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        unsafe {
+            match self.try_allocate(layout) {
+                Ok(mut ptr) => return ptr.as_mut(),
+                Err(_) => return null_mut(),
+            }
         }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+        assert!(!ptr.is_null(), "Given pointer to deallocate is NULL.");
     }
 }

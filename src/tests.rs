@@ -42,7 +42,7 @@ fn bump_boundary_conditions() {
 #[test]
 fn const_bump_boundary_conditions() {
     const HEAP_SIZE: usize = 100;
-    let allocator = Locked::new(ConstBumpAlloc::<HEAP_SIZE>::new());
+    let allocator = ConstBumpAlloc::<HEAP_SIZE>::new();
 
     unsafe {
         let layout = Layout::from_size_align(10, 1).unwrap();
