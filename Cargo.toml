@@ -7,9 +7,12 @@ edition = "2024"
 spin = { version = "0.10.0", default-features = false, features = ["mutex", "spin_mutex"] }
 
 [features]
-default = ["bump_alloc", "linked_list_alloc", "buddy_alloc", "slab_alloc", "const_bump_alloc"]
+default = ["bump_alloc", "linked_list_alloc", "buddy_alloc", "slab_alloc", "const_bump_alloc", "spin", "lockless", "const_able"]
 bump_alloc = []
 linked_list_alloc = []
 buddy_alloc = []
 slab_alloc = []
 const_bump_alloc = []
+spin = []
+lockless = []
+const_able = []

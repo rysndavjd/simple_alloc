@@ -8,16 +8,16 @@ use core::{
 
 /// Simple bump allocator using internal heap, initialized at compile time.
 #[derive(Debug)]
-pub struct ConstBumpAlloc<const S: usize> {
+pub struct BumpAlloc<const S: usize> {
     heap: [MaybeUninit<u8>; S],
     offset: AtomicUsize,
     allocations: AtomicUsize,
 }
 
-impl<const S: usize> ConstBumpAlloc<S> {
+impl<const S: usize> BumpAlloc<S> {
     /// Creates a new [`ConstBumpAlloc`].
     pub const fn new() -> Self {
-        ConstBumpAlloc {
+        BumpAlloc {
             heap: [MaybeUninit::<u8>::uninit(); S],
             offset: AtomicUsize::new(0),
             allocations: AtomicUsize::new(0),
@@ -53,7 +53,7 @@ impl<const S: usize> ConstBumpAlloc<S> {
     }
 }
 
-unsafe impl<const S: usize> Allocator for ConstBumpAlloc<S> {
+unsafe impl<const S: usize> Allocator for BumpAlloc<S> {
     unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, AllocatorError> {
         let alloc_start = align_up(self.next(), layout.align());
         let alloc_end = match alloc_start.checked_add(layout.size()) {
@@ -83,7 +83,7 @@ unsafe impl<const S: usize> Allocator for ConstBumpAlloc<S> {
     }
 }
 
-unsafe impl<const S: usize> GlobalAlloc for ConstBumpAlloc<S> {
+unsafe impl<const S: usize> GlobalAlloc for BumpAlloc<S> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         unsafe {
             match self.try_allocate(layout) {

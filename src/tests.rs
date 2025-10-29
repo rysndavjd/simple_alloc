@@ -4,11 +4,11 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::mem::MaybeUninit;
 
 use crate::{
-    buddy_alloc::BuddyAlloc,
-    bump_alloc::BumpAlloc,
+    spin_lock::{buddy_alloc::BuddyAlloc as BuddyAlloc_spin, bump_alloc::BumpAlloc as BumpAlloc_spin, 
+    linked_list_alloc::{LinkedListAlloc as LinkedListAlloc_spin, LinkedListHeap}
+    },
     common::{Locked, print_heap_dump},
-    const_bump_alloc::ConstBumpAlloc,
-    linked_list_alloc::{LinkedListAlloc, LinkedListHeap},
+    const_able::bump_alloc::BumpAlloc as BumpAlloc_const,
 };
 
 #[test]
@@ -16,7 +16,7 @@ fn bump_boundary_conditions() {
     const HEAP_SIZE: usize = 100;
     static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
-    let allocator = Locked::new(BumpAlloc::new());
+    let allocator = Locked::new(BumpAlloc_spin::new());
 
     unsafe {
         allocator.lock().init(&raw mut HEAP_MEM as usize, HEAP_SIZE);
@@ -42,7 +42,7 @@ fn bump_boundary_conditions() {
 #[test]
 fn const_bump_boundary_conditions() {
     const HEAP_SIZE: usize = 100;
-    let allocator = ConstBumpAlloc::<HEAP_SIZE>::new();
+    let allocator = BumpAlloc_const::<HEAP_SIZE>::new();
 
     unsafe {
         let layout = Layout::from_size_align(10, 1).unwrap();
@@ -68,7 +68,7 @@ fn linked_list_combine_free_regions() {
     const HEAP_SIZE: usize = 64;
     static mut HEAP_MEM: LinkedListHeap<HEAP_SIZE> = LinkedListHeap::new();
 
-    let allocator = Locked::new(LinkedListAlloc::new());
+    let allocator = Locked::new(LinkedListAlloc_spin::new());
 
     unsafe {
         allocator.lock().init(&raw mut HEAP_MEM);
@@ -162,7 +162,7 @@ fn linked_list_boundary_conditions() {
     const HEAP_SIZE: usize = 64;
     static mut HEAP_MEM: LinkedListHeap<HEAP_SIZE> = LinkedListHeap::new();
 
-    let allocator = Locked::new(LinkedListAlloc::new());
+    let allocator = Locked::new(LinkedListAlloc_spin::new());
 
     unsafe {
         allocator.lock().init(&raw mut HEAP_MEM);
@@ -193,7 +193,7 @@ fn buddy_alloc() {
     const HEAP_SIZE: usize = 512;
     static mut HEAP_MEM: Heap<HEAP_SIZE> = Heap([MaybeUninit::uninit(); HEAP_SIZE]);
 
-    let allocator = Locked::new(BuddyAlloc::new());
+    let allocator = Locked::new(BuddyAlloc_spin::new());
 
     unsafe {
         allocator
