@@ -92,6 +92,12 @@ unsafe impl Allocator for Locked<BumpAlloc> {
 
         return Ok(());
     }
+
+    fn remaining(&self) -> usize {
+        let bump = self.lock();
+        
+        return bump.end.checked_sub(bump.next).unwrap_or_default();
+    }
 }
 
 unsafe impl GlobalAlloc for Locked<BumpAlloc> {

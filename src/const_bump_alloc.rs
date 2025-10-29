@@ -77,6 +77,10 @@ unsafe impl<const S: usize> Allocator for ConstBumpAlloc<S> {
         -> Result<(), AllocatorError> {
         return Ok(());
     }
+
+    fn remaining(&self) -> usize {        
+        return self.heap_end().checked_sub(self.next()).unwrap_or_default();
+    }
 }
 
 unsafe impl<const S: usize> GlobalAlloc for ConstBumpAlloc<S> {

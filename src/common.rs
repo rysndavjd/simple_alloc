@@ -54,7 +54,7 @@ impl Debug for AllocatorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             AllocatorError::Oom(layout) => write!(f, "Out of Memory: layout: {layout:?}"),
-            AllocatorError::Overflow => write!(f, "Overflowed memory allocator."),
+            AllocatorError::Overflow => write!(f, "Overflowed memory allocator internals."),
             AllocatorError::Alignment(layout) => {
                 write!(f, "Unable to satisfy alignment requirement: {layout:?}")
             }
@@ -72,6 +72,8 @@ pub unsafe trait Allocator {
     /// # Safety
     unsafe fn try_deallocate(&self, ptr: NonNull<u8>, layout: Layout)
     -> Result<(), AllocatorError>;
+
+    fn remaining(&self) -> usize;
 
     /// # Safety
     unsafe fn try_allocate_zeroed(&self, layout: Layout) -> Result<NonNull<u8>, AllocatorError> {
