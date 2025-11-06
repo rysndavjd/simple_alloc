@@ -42,7 +42,7 @@ pub unsafe fn print_heap_dump(heap: *const u8, len: usize) {
     }
 }
 
-pub enum AllocatorError {
+pub enum BAllocatorError {
     Oom(Layout),
     Overflow,
     Alignment(Layout),
@@ -50,33 +50,33 @@ pub enum AllocatorError {
     Null,
 }
 
-impl Debug for AllocatorError {
+impl Debug for BAllocatorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            AllocatorError::Oom(layout) => write!(f, "Out of Memory: layout: {layout:?}"),
-            AllocatorError::Overflow => write!(f, "Overflowed memory allocator internals."),
-            AllocatorError::Alignment(layout) => {
+            BAllocatorError::Oom(layout) => write!(f, "Out of Memory: layout: {layout:?}"),
+            BAllocatorError::Overflow => write!(f, "Overflowed memory allocator internals."),
+            BAllocatorError::Alignment(layout) => {
                 write!(f, "Unable to satisfy alignment requirement: {layout:?}")
             }
-            AllocatorError::Layout(e) => write!(f, "Layout Error: {e:?}"),
-            AllocatorError::Null => write!(f, "NULL pointer."),
+            BAllocatorError::Layout(e) => write!(f, "Layout Error: {e:?}"),
+            BAllocatorError::Null => write!(f, "NULL pointer."),
         }
     }
 }
 
 /// # Safety
-pub unsafe trait Allocator {
+pub unsafe trait BAllocator {
     /// # Safety
-    unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, AllocatorError>;
+    unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError>;
 
     /// # Safety
     unsafe fn try_deallocate(&self, ptr: NonNull<u8>, layout: Layout)
-    -> Result<(), AllocatorError>;
+    -> Result<(), BAllocatorError>;
 
     fn remaining(&self) -> usize;
 
     /// # Safety
-    unsafe fn try_allocate_zeroed(&self, layout: Layout) -> Result<NonNull<u8>, AllocatorError> {
+    unsafe fn try_allocate_zeroed(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let size = layout.size();
         let ptr = unsafe { self.try_allocate(layout)? };
 
@@ -90,7 +90,7 @@ pub unsafe trait Allocator {
         &self,
         ptr: NonNull<u8>,
         layout: Layout,
-    ) -> Result<(), AllocatorError> {
+    ) -> Result<(), BAllocatorError> {
         unsafe {
             write_bytes(ptr.as_ptr(), 0, layout.size());
             self.try_deallocate(ptr, layout)?;

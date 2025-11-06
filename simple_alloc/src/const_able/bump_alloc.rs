@@ -1,4 +1,4 @@
-use crate::common::{Allocator, AllocatorError, align_up};
+use crate::common::{BAllocator, BAllocatorError, align_up};
 use core::{
     alloc::{GlobalAlloc, Layout},
     mem::MaybeUninit,
@@ -53,28 +53,28 @@ impl<const S: usize> BumpAlloc<S> {
     }
 }
 
-unsafe impl<const S: usize> Allocator for BumpAlloc<S> {
-    unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, AllocatorError> {
+unsafe impl<const S: usize> BAllocator for BumpAlloc<S> {
+    unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let alloc_start = align_up(self.next(), layout.align());
         let alloc_end = match alloc_start.checked_add(layout.size()) {
             Some(end) => end,
-            None => return Err(AllocatorError::Overflow),
+            None => return Err(BAllocatorError::Overflow),
         };
 
         if alloc_end > self.heap_end() {
-            return Err(AllocatorError::Oom(layout));
+            return Err(BAllocatorError::Oom(layout));
         } else {
             self.offset.store(match alloc_end.checked_sub(self.heap_start()) {
                 Some(end) => end,
-                None => return Err(AllocatorError::Overflow),
+                None => return Err(BAllocatorError::Overflow),
             }, Ordering::SeqCst);
             self.allocations.fetch_add(1, Ordering::SeqCst);
-            return NonNull::new(alloc_start as *mut u8).ok_or(AllocatorError::Null);
+            return NonNull::new(alloc_start as *mut u8).ok_or(BAllocatorError::Null);
         }
     }
 
     unsafe fn try_deallocate(&self, _ptr: NonNull<u8>, _layout: Layout)
-        -> Result<(), AllocatorError> {
+        -> Result<(), BAllocatorError> {
         return Ok(());
     }
 
