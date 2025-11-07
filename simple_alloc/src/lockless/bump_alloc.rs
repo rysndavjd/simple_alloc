@@ -1,8 +1,7 @@
 use crate::common::{BAllocator, BAllocatorError, align_up};
 use core::{
     alloc::{GlobalAlloc, Layout},
-    mem::MaybeUninit,
-    ptr::{null_mut, NonNull},
+    ptr::{NonNull, null_mut},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -63,11 +62,11 @@ impl BumpAlloc {
 unsafe impl BAllocator for BumpAlloc {
     unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let next = self.next.load(Ordering::SeqCst);
-        
+
         let alloc_start = align_up(next, layout.align());
         let alloc_end = match alloc_start.checked_add(layout.size()) {
             Some(end) => end,
-            None => return Err(BAllocatorError::Overflow),
+            None => return Err(BAllocatorError::Overflowed),
         };
 
         if alloc_end > self.end {
@@ -84,11 +83,19 @@ unsafe impl BAllocator for BumpAlloc {
         _ptr: NonNull<u8>,
         _layout: Layout,
     ) -> Result<(), BAllocatorError> {
+        let prev = self.allocations.fetch_sub(1, Ordering::AcqRel);
+
+        if prev == 1 {
+            self.next.store(self.start, Ordering::SeqCst);
+        }
+
         return Ok(());
     }
 
-    fn remaining(&self) -> usize {        
-        return self.end.checked_sub(self.next.load(Ordering::SeqCst))
+    fn remaining(&self) -> usize {
+        return self
+            .end
+            .checked_sub(self.next.load(Ordering::SeqCst))
             .unwrap_or_default();
     }
 }
@@ -103,7 +110,11 @@ unsafe impl GlobalAlloc for BumpAlloc {
         }
     }
 
-    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         assert!(!ptr.is_null(), "Given pointer to deallocate is NULL.");
+        unsafe {
+            self.try_deallocate(NonNull::new_unchecked(ptr), layout)
+                .unwrap()
+        }
     }
 }

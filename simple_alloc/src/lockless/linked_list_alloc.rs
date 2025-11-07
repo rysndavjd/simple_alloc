@@ -5,26 +5,10 @@ use core::{
     alloc::{GlobalAlloc, Layout},
     mem::{MaybeUninit, align_of, size_of},
     ptr::null_mut,
+    sync::atomic::AtomicPtr,
 };
 
 use crate::common::{Locked, align_up};
-
-#[repr(align(8))]
-pub struct LinkedListHeap<const S: usize>(pub [MaybeUninit<u8>; S]);
-
-impl<const S: usize> LinkedListHeap<S> {
-    /// Constructs a [`LinkedListHeap`] with given size `S`
-    pub const fn new() -> LinkedListHeap<S> {
-        assert!(S > 0, "Linked list heap cannot be zero in size.");
-        LinkedListHeap([MaybeUninit::uninit(); S])
-    }
-}
-
-impl<const S: usize> Default for LinkedListHeap<S> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[derive(Debug)]
 struct Node {
@@ -60,19 +44,6 @@ impl LinkedListAlloc {
     /// Creates a new empty [`LinkedListAlloc`]
     pub const fn new() -> Self {
         Self { head: Node::new(0) }
-    }
-
-    /// Initializes the linked list allocator with the given heap bounds via a [`LinkedListHeap`].
-    ///
-    /// # Safety
-    /// - Must be called only once.
-    /// - The provided heap must have at least 8 bytes available per allocation
-    ///   to store linked list metadata.
-    /// - `HEAP_SIZE` must be greater than 0.
-    pub unsafe fn init<const HEAP_SIZE: usize>(&mut self, heap: *mut LinkedListHeap<HEAP_SIZE>) {
-        unsafe {
-            self.add_free_region(&raw mut (*heap).0 as usize, HEAP_SIZE);
-        }
     }
 
     /// Initializes the linked list allocator with the given heap bounds.

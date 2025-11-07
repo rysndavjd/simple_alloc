@@ -1,18 +1,23 @@
 extern crate alloc;
 
-use core::alloc::{GlobalAlloc, Layout};
-use core::mem::MaybeUninit;
+use core::{
+    alloc::{GlobalAlloc, Layout},
+    mem::MaybeUninit,
+};
 
 use crate::{
-    spin_lock::{buddy_alloc::BuddyAlloc as BuddyAlloc_spin, bump_alloc::BumpAlloc as BumpAlloc_spin, 
-    linked_list_alloc::{LinkedListAlloc as LinkedListAlloc_spin, LinkedListHeap}
-    },
     common::{Locked, print_heap_dump},
     const_able::bump_alloc::BumpAlloc as BumpAlloc_const,
+    lockless::bump_alloc::BumpAlloc as BumpAlloc_lockless,
+    spin_lock::{
+        buddy_alloc::BuddyAlloc as BuddyAlloc_spin,
+        bump_alloc::BumpAlloc as BumpAlloc_spin,
+        linked_list_alloc::{LinkedListAlloc as LinkedListAlloc_spin, LinkedListHeap},
+    },
 };
 
 #[test]
-fn bump_boundary_conditions() {
+fn bump_spin_boundary_conditions() {
     const HEAP_SIZE: usize = 100;
     static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
@@ -40,7 +45,35 @@ fn bump_boundary_conditions() {
 }
 
 #[test]
-fn const_bump_boundary_conditions() {
+fn bump_lockless_boundary_conditions() {
+    const HEAP_SIZE: usize = 100;
+    static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+
+    let mut allocator = BumpAlloc_lockless::new();
+
+    unsafe {
+        allocator.init(&raw mut HEAP_MEM as usize, HEAP_SIZE);
+
+        let layout = Layout::from_size_align(10, 1).unwrap();
+        let mut ptrs = Vec::new();
+
+        loop {
+            let ptr = allocator.alloc(layout);
+            if ptr.is_null() {
+                break;
+            }
+            ptrs.push(ptr);
+        }
+
+        assert!(!ptrs.is_empty());
+
+        let ptr = allocator.alloc(layout);
+        assert!(ptr.is_null());
+    }
+}
+
+#[test]
+fn bump_const_boundary_conditions() {
     const HEAP_SIZE: usize = 100;
     let allocator = BumpAlloc_const::<HEAP_SIZE>::new();
 
@@ -64,7 +97,7 @@ fn const_bump_boundary_conditions() {
 }
 
 #[test]
-fn linked_list_combine_free_regions() {
+fn linked_list_spin_combine_free_regions() {
     const HEAP_SIZE: usize = 64;
     static mut HEAP_MEM: LinkedListHeap<HEAP_SIZE> = LinkedListHeap::new();
 
@@ -158,7 +191,7 @@ fn linked_list_combine_free_regions() {
 }
 
 #[test]
-fn linked_list_boundary_conditions() {
+fn linked_list_spin_boundary_conditions() {
     const HEAP_SIZE: usize = 64;
     static mut HEAP_MEM: LinkedListHeap<HEAP_SIZE> = LinkedListHeap::new();
 
@@ -186,7 +219,7 @@ fn linked_list_boundary_conditions() {
 }
 
 #[test]
-fn buddy_alloc() {
+fn buddy_spin_alloc() {
     #[repr(align(8))]
     pub struct Heap<const HEAP_SIZE: usize>(pub [MaybeUninit<u8>; HEAP_SIZE]);
 

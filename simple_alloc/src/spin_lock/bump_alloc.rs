@@ -45,12 +45,15 @@ impl BumpAlloc {
     /// - `heap_start + heap_size` must not overflow.
     /// - The caller must ensure exclusive access to provided memory region for the lifetime of the allocator.
     pub unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
-        assert!(heap_start != 0, "Given heap start pointer is NULL");
-        assert!(heap_size > 0, "Heap cannot be 0 in size");
+        debug_assert!(heap_start != 0, "Given heap start pointer is NULL");
+        debug_assert!(heap_size > 0, "Heap cannot be 0 in size");
+        debug_assert!(
+            heap_start + heap_size < usize::MAX,
+            "Heap end address overflowed"
+        );
+
         self.start = heap_start;
-        self.end = heap_start
-            .checked_add(heap_size)
-            .expect("Heap end address overflowed");
+        self.end = heap_start + heap_size;
         self.next = heap_start;
     }
 
@@ -67,7 +70,7 @@ unsafe impl BAllocator for Locked<BumpAlloc> {
         let alloc_start = align_up(bump.next, layout.align());
         let alloc_end = match alloc_start.checked_add(layout.size()) {
             Some(end) => end,
-            None => return Err(BAllocatorError::Overflow),
+            None => return Err(BAllocatorError::Overflowed),
         };
 
         if alloc_end > bump.end {
@@ -95,7 +98,7 @@ unsafe impl BAllocator for Locked<BumpAlloc> {
 
     fn remaining(&self) -> usize {
         let bump = self.lock();
-        
+
         return bump.end.checked_sub(bump.next).unwrap_or_default();
     }
 }

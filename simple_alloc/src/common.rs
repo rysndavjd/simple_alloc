@@ -44,7 +44,7 @@ pub unsafe fn print_heap_dump(heap: *const u8, len: usize) {
 
 pub enum BAllocatorError {
     Oom(Layout),
-    Overflow,
+    Overflowed,
     Alignment(Layout),
     Layout(LayoutError),
     Null,
@@ -53,13 +53,13 @@ pub enum BAllocatorError {
 impl Debug for BAllocatorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            BAllocatorError::Oom(layout) => write!(f, "Out of Memory: layout: {layout:?}"),
-            BAllocatorError::Overflow => write!(f, "Overflowed memory allocator internals."),
+            BAllocatorError::Oom(layout) => write!(f, "Out of Memory: {layout:?}"),
+            BAllocatorError::Overflowed => write!(f, "Overflowed memory allocator internal values"),
             BAllocatorError::Alignment(layout) => {
                 write!(f, "Unable to satisfy alignment requirement: {layout:?}")
             }
             BAllocatorError::Layout(e) => write!(f, "Layout Error: {e:?}"),
-            BAllocatorError::Null => write!(f, "NULL pointer."),
+            BAllocatorError::Null => write!(f, "NULL pointer"),
         }
     }
 }
@@ -70,8 +70,11 @@ pub unsafe trait BAllocator {
     unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError>;
 
     /// # Safety
-    unsafe fn try_deallocate(&self, ptr: NonNull<u8>, layout: Layout)
-    -> Result<(), BAllocatorError>;
+    unsafe fn try_deallocate(
+        &self,
+        ptr: NonNull<u8>,
+        layout: Layout,
+    ) -> Result<(), BAllocatorError>;
 
     fn remaining(&self) -> usize;
 
