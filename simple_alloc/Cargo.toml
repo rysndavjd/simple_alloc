@@ -4,14 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+conquer-once = { version = "0.4.0", default-features = false }
 spin = { version = "0.10.0", default-features = false, features = ["mutex", "spin_mutex"] }
 
 [features]
-default = ["bump_alloc", "linked_list_alloc", "buddy_alloc", "slab_alloc", "spin", "lockless", "const_able"]
+default = ["bump_alloc", "linked_list_alloc", "buddy_alloc", "slab_alloc"]
 bump_alloc = []
 linked_list_alloc = []
 buddy_alloc = []
 slab_alloc = []
-spin = []
-lockless = []
-const_able = []

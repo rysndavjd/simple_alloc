@@ -1,32 +1,11 @@
 use core::{
     alloc::{GlobalAlloc, Layout},
     fmt::{Debug, Formatter, Result as FmtResult},
-    mem::{MaybeUninit, align_of, size_of},
+    mem::{align_of, size_of},
     ptr::{NonNull, null_mut},
 };
 
 use crate::common::{Locked, align_up};
-
-#[repr(align(8))]
-pub struct BuddyHeap<const S: usize>(pub [MaybeUninit<u8>; S]);
-
-impl<const S: usize> BuddyHeap<S> {
-    /// Constructs a [`BuddyHeap`] with given size `S`
-    pub const fn new() -> BuddyHeap<S> {
-        assert!(S > 0, "Buddy heap cannot be zero in size.");
-        assert!(
-            S.is_power_of_two(),
-            "Buddy Allocator heap not a power of two."
-        );
-        BuddyHeap([MaybeUninit::uninit(); S])
-    }
-}
-
-impl<const S: usize> Default for BuddyHeap<S> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[derive(Debug)]
 pub struct FreeList {
@@ -118,21 +97,6 @@ impl BuddyAlloc {
         }
     }
 
-    /// Initializes the buddy allocator with the given heap bounds via a [`BuddyHeap`].
-    ///
-    /// # Safety
-    /// - Must be called only once.
-    /// - `HEAP_SIZE` must be greater than 0.
-    pub unsafe fn init<const S: usize>(&mut self, heap: *mut BuddyHeap<S>) {
-        let start = unsafe { &raw mut (*heap).0 };
-        self.base = start as *mut u8;
-        self.size = S;
-
-        unsafe {
-            self.add_free_area(start as usize, S.div_ceil(PAGE_SIZE).ilog2() as usize);
-        }
-    }
-
     /// Initializes the buddy allocator with the given heap bounds.
     ///
     /// # Safety
@@ -142,18 +106,18 @@ impl BuddyAlloc {
     /// - `size` must be greater than 0.
     /// - `start + size` must not overflow.
     /// - The caller must ensure exclusive access to provided memory region for the lifetime of the allocator.
-    pub unsafe fn init_with_ptr(&mut self, start: usize, size: usize) {
+    pub unsafe fn init(&mut self, start: usize, size: usize) {
         assert!(start != 0, "Given start for heap is NULL.");
         assert!(size > 0, "Buddy heap cannot be zero in size.");
         assert!(
             size.is_power_of_two(),
             "Buddy Allocator heap not a power of two."
         );
-        assert_eq!(
-            align_up(start, align_of::<FreeList>()),
-            start,
-            "Given start is not 8 byte aligned."
-        );
+        // assert_eq!(
+        //     align_up(start, align_of::<FreeList>()),
+        //     start,
+        //     "Given start is not 8 byte aligned."
+        // );
 
         self.base = start as *mut u8;
         self.size = size;

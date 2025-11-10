@@ -5,8 +5,8 @@ A collection of simple, pure Rust memory allocators for `no_std` and embedded en
 | Memory Allocator | Status | Const Variant | 
 |------------------|--------|---------------|
 | [Bump Alloc](https://os.phil-opp.com/allocator-designs/#bump-allocator) | Works | yes |
-| [Linked List Alloc](https://os.phil-opp.com/allocator-designs/#linked-list-allocator) | Works | no |
-| [Buddy Alloc](https://en.wikipedia.org/wiki/Buddy_memory_allocation) |  Works | no |
+| [Linked List Alloc](https://os.phil-opp.com/allocator-designs/#linked-list-allocator) | Inprogress | no |
+| [Buddy Alloc](https://en.wikipedia.org/wiki/Buddy_memory_allocation) |  Inprogress | no |
 | [Slab Alloc](https://en.wikipedia.org/wiki/Slab_allocation) | Inprogress | no |
 
 ### Status Definitions
