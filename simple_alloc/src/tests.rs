@@ -7,10 +7,7 @@ use core::{
 
 use alloc::vec::Vec;
 
-use crate::{
-    bump_alloc::{ConstBumpAlloc, LockedBumpAlloc},
-    common::BAllocator,
-};
+use crate::{bump_alloc::{ConstBumpAlloc, LockedBumpAlloc}, common::BAllocator};
 
 #[test]
 fn te() {

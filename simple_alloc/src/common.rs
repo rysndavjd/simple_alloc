@@ -92,20 +92,16 @@ pub unsafe trait BAllocator {
     }
 }
 
-pub trait Strategy {}
-pub struct LockedAlloc;
-impl Strategy for LockedAlloc {}
-pub struct LocklessAlloc;
-impl Strategy for LocklessAlloc {}
-pub struct ConstAlloc;
-impl Strategy for ConstAlloc {}
+// TODO
+pub trait LockedAlloc {}
+pub trait LocklessAlloc {}
+pub trait ConstAlloc {}
 
-pub struct Alloc<A: BAllocator, S: Strategy> {
+pub struct Alloc<A: BAllocator> {
     pub(crate) alloc: A,
-    pub(crate) _strategy: PhantomData<S>,
 }
 
-unsafe impl<A: BAllocator, S: Strategy> BAllocator for Alloc<A, S> {
+unsafe impl<A: BAllocator> BAllocator for Alloc<A> {
     unsafe fn init(&self, start: usize, size: usize) {
         unsafe {
             self.alloc.init(start, size);
@@ -133,7 +129,7 @@ unsafe impl<A: BAllocator, S: Strategy> BAllocator for Alloc<A, S> {
     }
 }
 
-unsafe impl<A: BAllocator, S: Strategy> GlobalAlloc for Alloc<A, S> {
+unsafe impl<A: BAllocator> GlobalAlloc for Alloc<A> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         unsafe {
             match self.alloc.try_allocate(layout) {

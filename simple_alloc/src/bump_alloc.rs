@@ -11,9 +11,9 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-pub type LockedBumpAlloc = Alloc<Locked<LockedBump>, LockedAlloc>;
-pub type LocklessBumpAlloc = Alloc<OnceCell<LocklessBump>, LocklessAlloc>;
-pub type ConstBumpAlloc<const S: usize> = Alloc<ConstBump<S>, ConstAlloc>;
+pub type LockedBumpAlloc = Alloc<Locked<LockedBump>>;
+pub type LocklessBumpAlloc = Alloc<OnceCell<LocklessBump>>;
+pub type ConstBumpAlloc<const S: usize> = Alloc<ConstBump<S>>;
 
 #[derive(Debug)]
 pub struct LockedBump {
@@ -109,11 +109,10 @@ unsafe impl BAllocator for Locked<LockedBump> {
     }
 }
 
-impl Alloc<Locked<LockedBump>, LockedAlloc> {
+impl Alloc<Locked<LockedBump>> {
     pub const fn new() -> Self {
         Alloc {
             alloc: Locked::new(LockedBump::new()),
-            _strategy: PhantomData,
         }
     }
 }
@@ -220,11 +219,10 @@ unsafe impl BAllocator for OnceCell<LocklessBump> {
     }
 }
 
-impl Alloc<OnceCell<LocklessBump>, LocklessAlloc> {
+impl Alloc<OnceCell<LocklessBump>> {
     pub const fn new() -> Self {
         Alloc {
             alloc: OnceCell::uninit(),
-            _strategy: PhantomData,
         }
     }
 }
@@ -319,11 +317,10 @@ unsafe impl<const S: usize> BAllocator for ConstBump<S> {
     }
 }
 
-impl<const S: usize> Alloc<ConstBump<S>, ConstAlloc> {
+impl<const S: usize> Alloc<ConstBump<S>> {
     pub const fn new() -> Self {
         Alloc {
             alloc: ConstBump::new(),
-            _strategy: PhantomData,
         }
     }
 }
