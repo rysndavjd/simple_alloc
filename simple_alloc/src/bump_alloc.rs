@@ -1,17 +1,16 @@
-use crate::common::{
-    ALLOCATOR_UNINITIALIZED, Alloc, BAllocator, BAllocatorError, ConstAlloc, Locked, LockedAlloc,
-    LocklessAlloc, align_up,
-};
+use crate::common::{ALLOCATOR_UNINITIALIZED, Alloc, BAllocator, BAllocatorError, align_up};
 use conquer_once::spin::OnceCell;
 use core::{
     alloc::Layout,
-    marker::PhantomData,
     mem::MaybeUninit,
     ptr::NonNull,
     sync::atomic::{AtomicUsize, Ordering},
 };
+#[cfg(feature = "log")]
+use log::{debug, error, warn};
+use spin::Mutex;
 
-pub type LockedBumpAlloc = Alloc<Locked<LockedBump>>;
+pub type LockedBumpAlloc = Alloc<Mutex<LockedBump>>;
 pub type LocklessBumpAlloc = Alloc<OnceCell<LocklessBump>>;
 pub type ConstBumpAlloc<const S: usize> = Alloc<ConstBump<S>>;
 
@@ -21,6 +20,12 @@ pub struct LockedBump {
     end: usize,
     next: usize,
     allocations: usize,
+}
+
+impl Default for LockedBump {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LockedBump {
@@ -63,9 +68,11 @@ impl LockedBump {
     }
 }
 
-unsafe impl BAllocator for Locked<LockedBump> {
+unsafe impl BAllocator for Mutex<LockedBump> {
     unsafe fn init(&self, start: usize, size: usize) {
         unsafe {
+            #[cfg(feature = "log")]
+            debug!("Initialized locked bump alloc; start: {start:X}, size: {size}");
             self.lock().init(start, size);
         }
     }
@@ -80,10 +87,14 @@ unsafe impl BAllocator for Locked<LockedBump> {
         };
 
         if alloc_end > bump.end {
+            #[cfg(feature = "log")]
+            error!("Out of memory");
             return Err(BAllocatorError::Oom(layout));
         } else {
             bump.next = alloc_end;
             bump.allocations += 1;
+            #[cfg(feature = "log")]
+            debug!("Allocated object {}; layout: {layout:?}", bump.allocations);
             return NonNull::new(alloc_start as *mut u8).ok_or(BAllocatorError::Null);
         }
     }
@@ -94,8 +105,15 @@ unsafe impl BAllocator for Locked<LockedBump> {
         _layout: Layout,
     ) -> Result<(), BAllocatorError> {
         let mut bump = self.lock();
+        #[cfg(feature = "log")]
+        debug!(
+            "Deallocated object {}; layout: {_layout:?}",
+            bump.allocations
+        );
         bump.allocations -= 1;
         if bump.allocations == 0 {
+            #[cfg(feature = "log")]
+            debug!("All objects deallocated, reseting next pointer to start",);
             bump.next = bump.start;
         }
 
@@ -109,11 +127,17 @@ unsafe impl BAllocator for Locked<LockedBump> {
     }
 }
 
-impl Alloc<Locked<LockedBump>> {
+impl Alloc<Mutex<LockedBump>> {
     pub const fn new() -> Self {
         Alloc {
-            alloc: Locked::new(LockedBump::new()),
+            alloc: Mutex::new(LockedBump::new()),
         }
+    }
+}
+
+impl Default for Alloc<Mutex<LockedBump>> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -123,6 +147,12 @@ pub struct LocklessBump {
     end: usize,
     next: AtomicUsize,
     allocations: AtomicUsize,
+}
+
+impl Default for LocklessBump {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LocklessBump {
@@ -165,6 +195,8 @@ impl LocklessBump {
 
 unsafe impl BAllocator for OnceCell<LocklessBump> {
     unsafe fn init(&self, start: usize, size: usize) {
+        #[cfg(feature = "log")]
+        debug!("Initialized lockless bump alloc; start: {start:X}, size: {size}");
         self.init_once(|| {
             let mut bump = LocklessBump::new();
             unsafe {
@@ -186,10 +218,17 @@ unsafe impl BAllocator for OnceCell<LocklessBump> {
         };
 
         if alloc_end > alloc.end {
+            #[cfg(feature = "log")]
+            error!("Out of memory");
             return Err(BAllocatorError::Oom(layout));
         } else {
             alloc.next.store(alloc_end, Ordering::SeqCst);
             alloc.allocations.fetch_add(1, Ordering::SeqCst);
+            #[cfg(feature = "log")]
+            debug!(
+                "Allocated object {}; layout: {layout:?}",
+                alloc.allocations.load(Ordering::SeqCst)
+            );
             return NonNull::new(alloc_start as *mut u8).ok_or(BAllocatorError::Null);
         }
     }
@@ -202,7 +241,11 @@ unsafe impl BAllocator for OnceCell<LocklessBump> {
         let alloc = self.get().expect(ALLOCATOR_UNINITIALIZED);
 
         let prev = alloc.allocations.fetch_sub(1, Ordering::AcqRel);
+        #[cfg(feature = "log")]
+        debug!("Deallocated object {}; layout: {_layout:?}", prev);
         if prev == 1 {
+            #[cfg(feature = "log")]
+            debug!("All objects deallocated, reseting next pointer to start",);
             alloc.next.store(alloc.start, Ordering::SeqCst);
         }
 
@@ -227,11 +270,23 @@ impl Alloc<OnceCell<LocklessBump>> {
     }
 }
 
+impl Default for Alloc<OnceCell<LocklessBump>> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 pub struct ConstBump<const S: usize> {
     heap: [MaybeUninit<u8>; S],
     offset: AtomicUsize,
     allocations: AtomicUsize,
+}
+
+impl<const S: usize> Default for ConstBump<S> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<const S: usize> ConstBump<S> {
@@ -274,7 +329,10 @@ impl<const S: usize> ConstBump<S> {
 }
 
 unsafe impl<const S: usize> BAllocator for ConstBump<S> {
-    unsafe fn init(&self, _start: usize, _size: usize) {}
+    unsafe fn init(&self, _start: usize, _size: usize) {
+        #[cfg(feature = "log")]
+        warn!("Const bump alloc is already initialized at compile time, so this does nothing.");
+    }
 
     unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let alloc_start = align_up(self.next(), layout.align());
@@ -284,6 +342,8 @@ unsafe impl<const S: usize> BAllocator for ConstBump<S> {
         };
 
         if alloc_end > self.heap_end() {
+            #[cfg(feature = "log")]
+            error!("Out of memory");
             return Err(BAllocatorError::Oom(layout));
         } else {
             self.offset.store(
@@ -294,6 +354,11 @@ unsafe impl<const S: usize> BAllocator for ConstBump<S> {
                 Ordering::SeqCst,
             );
             self.allocations.fetch_add(1, Ordering::SeqCst);
+            #[cfg(feature = "log")]
+            debug!(
+                "Allocated object {}; layout: {layout:?}",
+                self.allocations.load(Ordering::SeqCst)
+            );
             return NonNull::new(alloc_start as *mut u8).ok_or(BAllocatorError::Null);
         }
     }
@@ -304,8 +369,12 @@ unsafe impl<const S: usize> BAllocator for ConstBump<S> {
         _layout: Layout,
     ) -> Result<(), BAllocatorError> {
         let prev = self.allocations.fetch_sub(1, Ordering::AcqRel);
+        #[cfg(feature = "log")]
+        debug!("Deallocated object {}; layout: {_layout:?}", prev);
 
         if prev == 1 {
+            #[cfg(feature = "log")]
+            debug!("All objects deallocated, reseting next pointer to start",);
             self.offset.store(0, Ordering::SeqCst);
         }
 

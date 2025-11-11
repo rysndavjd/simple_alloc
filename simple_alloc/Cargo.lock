@@ -18,10 +18,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e763eef8846b13b380f37dfecda401770b0ca4e56e95170237bd7c25c7db3582"
 
 [[package]]
+name = "log"
+version = "0.4.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
+
+[[package]]
 name = "simple_alloc"
 version = "0.1.0"
 dependencies = [
  "conquer-once",
+ "log",
  "spin",
 ]
 

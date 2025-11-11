@@ -1,28 +1,12 @@
 use core::{
     alloc::{GlobalAlloc, Layout, LayoutError},
     fmt::{Debug, Formatter, Result as FmtResult},
-    marker::PhantomData,
     ptr::{NonNull, null_mut, write_bytes},
 };
-use spin::{Mutex, MutexGuard};
+#[cfg(feature = "log")]
+use log::error;
 
 pub const ALLOCATOR_UNINITIALIZED: &str = "Allocator not initialized.";
-
-pub struct Locked<A> {
-    inner: Mutex<A>,
-}
-
-impl<A> Locked<A> {
-    pub const fn new(inner: A) -> Self {
-        Locked {
-            inner: Mutex::new(inner),
-        }
-    }
-
-    pub fn lock(&self) -> MutexGuard<'_, A> {
-        self.inner.lock()
-    }
-}
 
 pub fn align_up(addr: usize, align: usize) -> usize {
     let offset = (addr as *const u8).align_offset(align);
@@ -92,11 +76,6 @@ pub unsafe trait BAllocator {
     }
 }
 
-// TODO
-pub trait LockedAlloc {}
-pub trait LocklessAlloc {}
-pub trait ConstAlloc {}
-
 pub struct Alloc<A: BAllocator> {
     pub(crate) alloc: A,
 }
@@ -134,7 +113,11 @@ unsafe impl<A: BAllocator> GlobalAlloc for Alloc<A> {
         unsafe {
             match self.alloc.try_allocate(layout) {
                 Ok(mut ptr) => return ptr.as_mut(),
-                Err(_) => return null_mut(),
+                Err(_e) => {
+                    #[cfg(feature = "log")]
+                    error!("Allocation error: {:?}", _e);
+                    return null_mut();
+                }
             }
         }
     }
@@ -142,9 +125,13 @@ unsafe impl<A: BAllocator> GlobalAlloc for Alloc<A> {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         assert!(!ptr.is_null(), "Given pointer to deallocate is NULL.");
         unsafe {
-            self.alloc
+            if let Err(_e) = self
+                .alloc
                 .try_deallocate(NonNull::new_unchecked(ptr), layout)
-                .unwrap()
+            {
+                #[cfg(feature = "log")]
+                error!("Deallocation error: {:?}", _e)
+            }
         }
     }
 }
