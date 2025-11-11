@@ -7,11 +7,16 @@ use core::{
 
 use alloc::vec::Vec;
 
-use crate::{bump_alloc::{ConstBumpAlloc, LockedBumpAlloc}, common::BAllocator};
+use crate::{
+    bump_alloc::{ConstBumpAlloc, LockedBumpAlloc, LocklessBumpAlloc},
+    common::{BAllocator, LocklessAlloc},
+};
 
 #[test]
 fn te() {
-    let allocator = LockedBumpAlloc::new();
+    let allocator = LocklessBumpAlloc::new();
+
+    unsafe { allocator.init(0, 0) };
 }
 
 // #[test]

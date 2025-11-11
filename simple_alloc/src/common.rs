@@ -38,9 +38,6 @@ impl Debug for BAllocatorError {
 /// # Safety
 pub unsafe trait BAllocator {
     /// # Safety
-    unsafe fn init(&self, start: usize, size: usize);
-
-    /// # Safety
     unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError>;
 
     /// # Safety
@@ -49,8 +46,6 @@ pub unsafe trait BAllocator {
         ptr: NonNull<u8>,
         layout: Layout,
     ) -> Result<(), BAllocatorError>;
-
-    fn remaining(&self) -> usize;
 
     /// # Safety
     unsafe fn try_allocate_zeroed(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
@@ -76,17 +71,21 @@ pub unsafe trait BAllocator {
     }
 }
 
+pub trait LockedAlloc {
+    /// # Safety
+    unsafe fn init(&self, start: usize, size: usize);
+}
+pub trait LocklessAlloc {
+    /// # Safety
+    unsafe fn init(&self, start: usize, size: usize);
+}
+pub trait ConstAlloc {}
+
 pub struct Alloc<A: BAllocator> {
     pub(crate) alloc: A,
 }
 
 unsafe impl<A: BAllocator> BAllocator for Alloc<A> {
-    unsafe fn init(&self, start: usize, size: usize) {
-        unsafe {
-            self.alloc.init(start, size);
-        };
-    }
-
     unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         unsafe {
             return self.alloc.try_allocate(layout);
@@ -101,10 +100,6 @@ unsafe impl<A: BAllocator> BAllocator for Alloc<A> {
         unsafe {
             return self.alloc.try_deallocate(ptr, layout);
         }
-    }
-
-    fn remaining(&self) -> usize {
-        return self.alloc.remaining();
     }
 }
 
