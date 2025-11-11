@@ -6,16 +6,16 @@ use core::{
     alloc::Layout,
     fmt::{Debug, Formatter, Result as FmtResult},
     mem::{align_of, size_of},
-    ptr::{NonNull, null_mut},
+    ptr::NonNull,
 };
 use spin::Mutex;
 
 #[derive(Debug)]
-pub struct FreeList {
-    pub next: Option<NonNull<FreeList>>,
+pub struct FreeList<'a> {
+    pub next: Option<&'a mut FreeList<'a>>,
 }
 
-impl FreeList {
+impl<'a> FreeList<'a> {
     const fn new() -> Self {
         Self { next: None }
     }
@@ -26,53 +26,48 @@ impl FreeList {
 }
 
 #[derive(Debug)]
-pub struct FreeArea {
-    pub head: Option<NonNull<FreeList>>,
+pub struct FreeArea<'a> {
+    pub head: Option<&'a mut FreeList<'a>>,
     pub nr_free: usize,
 }
 
-impl FreeArea {
-    const fn new() -> FreeArea {
+impl<'a> FreeArea<'a> {
+    const fn new() -> FreeArea<'a> {
         FreeArea {
             head: None,
             nr_free: 0,
         }
     }
 
-    fn push(&mut self, mut value: NonNull<FreeList>) {
-        unsafe {
-            value.as_mut().next = self.head;
-        }
+    fn push(&mut self, value: &'a mut FreeList<'a>) {
+        value.next = self.head.take();
         self.head = Some(value);
         self.nr_free += 1;
     }
 
-    fn pop(&mut self) -> Option<NonNull<FreeList>> {
-        if let Some(mut node) = self.head {
-            unsafe {
-                self.head = node.as_ref().next;
-                node.as_mut().next = None;
-            }
+    fn pop(&mut self) -> Option<&'a mut FreeList<'a>> {
+        if let Some(node) = self.head.take() {
+            self.head = node.next.take();
             self.nr_free -= 1;
-            Some(node)
+            return Some(node);
         } else {
-            None
+            return None;
         }
     }
 }
 
 pub const PAGE_SIZE: usize = 8;
 pub const MIN_ORDER: usize = 0;
-pub const MAX_ORDER: usize = 22;
+pub const MAX_ORDER: usize = 32;
 pub const NR_MAX_ORDER: usize = MAX_ORDER + 1;
 
-pub struct LockedBuddy {
-    base: *mut u8,
+pub struct LockedBuddy<'a> {
+    base: usize,
     size: usize,
-    list_areas: [FreeArea; NR_MAX_ORDER],
+    list_areas: [FreeArea<'a>; NR_MAX_ORDER],
 }
 
-impl Debug for LockedBuddy {
+impl<'a> Debug for LockedBuddy<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         writeln!(f, "LockedBuddy {{")?;
         writeln!(f, "    base: {:?}", self.base)?;
@@ -85,16 +80,16 @@ impl Debug for LockedBuddy {
     }
 }
 
-impl Default for LockedBuddy {
+impl<'a> Default for LockedBuddy<'a> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LockedBuddy {
-    const fn new() -> LockedBuddy {
+impl<'a> LockedBuddy<'a> {
+    const fn new() -> LockedBuddy<'a> {
         LockedBuddy {
-            base: null_mut(),
+            base: 0,
             size: 0,
             list_areas: [const { FreeArea::new() }; NR_MAX_ORDER],
         }
@@ -113,7 +108,7 @@ impl LockedBuddy {
             "Given start is not 8 byte aligned."
         );
 
-        self.base = start as *mut u8;
+        self.base = start;
         self.size = size;
 
         unsafe {
@@ -129,13 +124,13 @@ impl LockedBuddy {
         assert_eq!(align_up(addr, align_of::<FreeList>()), addr);
 
         let mut new_item = FreeList::new();
-        new_item.next = self.list_areas[order].head;
+        new_item.next = self.list_areas[order].head.take();
 
         let node_ptr = addr as *mut FreeList;
 
         unsafe {
             node_ptr.write_volatile(new_item);
-            self.list_areas[order].head = NonNull::new(node_ptr);
+            self.list_areas[order].head = Some(&mut *node_ptr);
             self.list_areas[order].nr_free += 1;
         }
     }
@@ -162,13 +157,11 @@ impl LockedBuddy {
                     .expect("Calculating buddy_order has underflowed the usize");
                 let block_size = PAGE_SIZE << buddy_order;
 
-                unsafe {
-                    let start_addr = area.as_ref().start_addr();
-                    let buddy_addr = start_addr + block_size;
+                let start_addr = area.start_addr();
+                let buddy_addr = start_addr + block_size;
 
-                    self.push_to_order(buddy_order, start_addr);
-                    self.push_to_order(buddy_order, buddy_addr);
-                }
+                self.push_to_order(buddy_order, start_addr);
+                self.push_to_order(buddy_order, buddy_addr);
             }
         }
         return Err(());
@@ -189,7 +182,7 @@ impl LockedBuddy {
                 let node_ptr = new_addr as *mut FreeList;
                 unsafe {
                     node_ptr.write_volatile(FreeList::new());
-                    self.list_areas[current_order + 1].push(NonNull::new_unchecked(node_ptr));
+                    self.list_areas[current_order + 1].push(&mut *node_ptr);
                 }
             }
         }
@@ -201,7 +194,7 @@ impl LockedBuddy {
 
         unsafe {
             node_ptr.write_volatile(FreeList::new());
-            self.list_areas[order].push(NonNull::new_unchecked(node_ptr));
+            self.list_areas[order].push(&mut *node_ptr);
         }
     }
 
@@ -223,7 +216,7 @@ impl LockedBuddy {
     }
 }
 
-unsafe impl BAllocator for Mutex<LockedBuddy> {
+unsafe impl BAllocator for Mutex<LockedBuddy<'_>> {
     unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let size = LockedBuddy::size_align(layout);
         let mut allocator = self.lock();
@@ -240,7 +233,7 @@ unsafe impl BAllocator for Mutex<LockedBuddy> {
                 return Err(BAllocatorError::Oom(layout));
             }
         };
-        let alloc_start = region.as_ptr() as *mut u8;
+        let alloc_start = region.start_addr() as *mut u8;
 
         return Ok(unsafe { NonNull::new_unchecked(alloc_start) });
     }
@@ -262,7 +255,7 @@ unsafe impl BAllocator for Mutex<LockedBuddy> {
     }
 }
 
-impl Alloc<Mutex<LockedBuddy>> {
+impl Alloc<Mutex<LockedBuddy<'_>>> {
     pub const fn new() -> Self {
         Alloc {
             alloc: Mutex::new(LockedBuddy::new()),
@@ -270,13 +263,13 @@ impl Alloc<Mutex<LockedBuddy>> {
     }
 }
 
-impl Default for Alloc<Mutex<LockedBuddy>> {
+impl Default for Alloc<Mutex<LockedBuddy<'_>>> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LockedAlloc for Mutex<LockedBuddy> {
+impl LockedAlloc for Mutex<LockedBuddy<'_>> {
     unsafe fn init(&self, start: usize, size: usize) {
         unsafe {
             // #[cfg(feature = "log")]
@@ -286,7 +279,7 @@ impl LockedAlloc for Mutex<LockedBuddy> {
     }
 }
 
-impl LockedAlloc for Alloc<Mutex<LockedBuddy>> {
+impl LockedAlloc for Alloc<Mutex<LockedBuddy<'_>>> {
     unsafe fn init(&self, start: usize, size: usize) {
         unsafe { self.alloc.init(start, size) };
     }
