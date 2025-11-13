@@ -6,11 +6,14 @@ use core::{
     mem::{align_of, size_of},
     ptr::{NonNull, null_mut},
 };
+
+#[cfg(debug_assertions)]
+use log::debug;
 use spin::Mutex;
 
-use crate::common::{ALLOCATOR_UNINITIALIZED, Alloc, BAllocator, BAllocatorError, align_up};
-
-pub type LockedLinkedListAlloc = Alloc<Mutex<LockedLinkedList>>;
+use crate::common::{
+    ALLOCATOR_UNINITIALIZED, Alloc, AllocInit, BAllocator, BAllocatorError, align_up,
+};
 
 #[derive(Debug)]
 struct Node {
@@ -43,23 +46,11 @@ impl Default for LockedLinkedList {
 }
 
 impl LockedLinkedList {
-    /// Creates a new empty [`LinkedListAlloc`]
-    pub const fn new() -> Self {
+    const fn new() -> Self {
         Self { head: Node::new(0) }
     }
 
-    /// Initializes the linked list allocator with the given heap bounds.
-    ///
-    /// # Safety
-    /// - Must be called only once.
-    /// - The heap memory region must have at least 8 bytes available per allocation
-    ///   to store linked list metadata.
-    /// - The heap must be 8 byte aligned.    
-    /// - `heap_start` must be valid memory address (NON-NULL).
-    /// - `heap_size` must be greater than 0.
-    /// - `heap_start + heap_size` must not overflow.
-    /// - The caller must ensure exclusive access to provided memory region for the lifetime of the allocator.
-    pub unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
+    unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
         debug_assert!(heap_size > 0, "Linked list heap cannot be zero in size.");
         debug_assert_eq!(
             align_up(heap_start, align_of::<Node>()),
@@ -144,10 +135,6 @@ impl LockedLinkedList {
 }
 
 unsafe impl BAllocator for Mutex<LockedLinkedList> {
-    unsafe fn init(&self, start: usize, size: usize) {
-        unsafe { self.lock().init(start, size) };
-    }
-
     unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let (size, align) = LockedLinkedList::size_align(layout);
         let mut allocator = self.lock();
@@ -182,8 +169,31 @@ unsafe impl BAllocator for Mutex<LockedLinkedList> {
         }
         return Ok(());
     }
+}
 
-    fn remaining(&self) -> usize {
-        0
+unsafe impl Sync for Alloc<Mutex<LockedLinkedList>> {}
+unsafe impl Send for Alloc<Mutex<LockedLinkedList>> {}
+
+impl Alloc<Mutex<LockedLinkedList>> {
+    pub const fn new() -> Self {
+        Alloc {
+            alloc: Mutex::new(LockedLinkedList::new()),
+        }
+    }
+}
+
+impl Default for Alloc<Mutex<LockedLinkedList>> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AllocInit for Mutex<LockedLinkedList> {
+    unsafe fn init(&self, start: usize, size: usize) {
+        unsafe {
+            #[cfg(debug_assertions)]
+            debug!("Initialized locked bump alloc; start: {start:X}, size: {size}");
+            self.lock().init(start, size);
+        }
     }
 }
