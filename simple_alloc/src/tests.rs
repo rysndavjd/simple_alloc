@@ -1,22 +1,54 @@
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 use core::{
     alloc::{GlobalAlloc, Layout},
     mem::MaybeUninit,
 };
+use std::{print, println, sync::Arc};
 
-use alloc::vec::Vec;
+use loom::thread;
 
 use crate::{
+    buddy_alloc::LockedBuddyAlloc,
     bump_alloc::{ConstBumpAlloc, LockedBumpAlloc, LocklessBumpAlloc},
-    common::{BAllocator, LocklessAlloc},
+    common::{AllocInit, BAllocator},
 };
+
+pub unsafe fn print_mem(heap: *const u8, len: usize) {
+    unsafe {
+        for i in 0..len {
+            if i % 16 == 0 {
+                print!("\n{:08x}: ", i);
+            }
+            print!("{:02x} ", *heap.add(i));
+        }
+        println!();
+    }
+}
+
+#[repr(align(8))]
+struct Heap8Byte<const S: usize>([MaybeUninit<u8>; S]);
 
 #[test]
 fn te() {
-    let allocator = LocklessBumpAlloc::new();
+    const HEAP_SIZE: usize = 4096 * 8192;
+    static mut HEAP_MEM: Heap8Byte<HEAP_SIZE> = Heap8Byte([MaybeUninit::uninit(); HEAP_SIZE]);
 
-    unsafe { allocator.init(0, 0) };
+    loom::model(|| {
+        let allocator = LockedBuddyAlloc::new();
+        unsafe { allocator.init(&raw mut HEAP_MEM.0 as usize, HEAP_SIZE) };
+
+        let a = Arc::new(allocator);
+        let b = a.clone();
+        thread::spawn(move || unsafe {
+            let _ = b.alloc(Layout::from_size_align(8, 1).unwrap());
+        });
+        unsafe {
+            let _ = a.alloc(Layout::from_size_align(32, 1).unwrap());
+        }
+    });
 }
 
 // #[test]

@@ -1,8 +1,13 @@
-use crate::common::{Alloc, BAllocator, BAllocatorError, LockedAlloc, align_up};
 use core::{alloc::Layout, ptr::NonNull};
-#[cfg(feature = "log")]
+
+#[cfg(debug_assertions)]
 use log::{debug, error};
 use spin::Mutex;
+
+use crate::common::{
+    Alloc, AllocInit, AllocState, BAllocator, BAllocatorError, HEAP_END_OVERFLOWED, HEAP_SIZE_ZERO,
+    HEAP_START_NULL, OOM, align_up,
+};
 
 #[derive(Debug)]
 pub struct LockedBump {
@@ -29,11 +34,12 @@ impl LockedBump {
     }
 
     unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
-        debug_assert!(heap_start != 0, "Given heap start pointer is NULL");
-        debug_assert!(heap_size > 0, "Heap cannot be 0 in size");
+        debug_assert!(heap_start != 0, "{}", HEAP_START_NULL);
+        debug_assert!(heap_size > 0, "{}", HEAP_SIZE_ZERO);
         debug_assert!(
             heap_start + heap_size < usize::MAX,
-            "Heap end address overflowed"
+            "{}",
+            HEAP_END_OVERFLOWED
         );
 
         self.start = heap_start;
@@ -57,14 +63,15 @@ unsafe impl BAllocator for Mutex<LockedBump> {
         };
 
         if alloc_end > bump.end {
-            #[cfg(feature = "log")]
-            error!("Out of memory");
+            #[cfg(debug_assertions)]
+            error!("{}", OOM);
             return Err(BAllocatorError::Oom(layout));
         } else {
             bump.next = alloc_end;
             bump.allocations += 1;
-            #[cfg(feature = "log")]
-            debug!("Allocated object {}; layout: {layout:?}", bump.allocations);
+            #[cfg(debug_assertions)]
+            #[cfg(debug_assertions)]
+            debug!("Allocated object \"{:X}\"; layout: {layout:?}", alloc_start);
             return NonNull::new(alloc_start as *mut u8).ok_or(BAllocatorError::Null);
         }
     }
@@ -75,18 +82,19 @@ unsafe impl BAllocator for Mutex<LockedBump> {
         _layout: Layout,
     ) -> Result<(), BAllocatorError> {
         let mut bump = self.lock();
-        #[cfg(feature = "log")]
-        debug!(
-            "Deallocated object {}; layout: {_layout:?}",
-            bump.allocations
-        );
+
         bump.allocations -= 1;
         if bump.allocations == 0 {
-            #[cfg(feature = "log")]
+            #[cfg(debug_assertions)]
             debug!("All objects deallocated, reseting next pointer to start",);
             bump.next = bump.start;
         }
 
+        #[cfg(debug_assertions)]
+        debug!(
+            "Deallocated object \"{:X}\"; layout: {_layout:?}",
+            _ptr.as_ptr() as usize
+        );
         return Ok(());
     }
 }
@@ -105,18 +113,23 @@ impl Default for Alloc<Mutex<LockedBump>> {
     }
 }
 
-impl LockedAlloc for Mutex<LockedBump> {
+impl AllocInit for Mutex<LockedBump> {
     unsafe fn init(&self, start: usize, size: usize) {
         unsafe {
-            #[cfg(feature = "log")]
+            #[cfg(debug_assertions)]
             debug!("Initialized locked bump alloc; start: {start:X}, size: {size}");
             self.lock().init(start, size);
         }
     }
 }
 
-impl LockedAlloc for Alloc<Mutex<LockedBump>> {
-    unsafe fn init(&self, start: usize, size: usize) {
-        unsafe { self.alloc.init(start, size) };
+impl AllocState for Mutex<LockedBump> {
+    fn remaining(&self) -> usize {
+        let alloc = self.lock();
+        return alloc.end.checked_sub(alloc.next).unwrap_or_default();
+    }
+    fn allocations(&self) -> usize {
+        let alloc = self.lock();
+        return alloc.allocations;
     }
 }

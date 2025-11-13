@@ -8,10 +8,12 @@ conquer-once = { version = "0.4.0", default-features = false }
 log = { version = "0.4.28", default-features = false }
 spin = { version = "0.10.0", default-features = false, features = ["mutex", "spin_mutex"] }
 
+[dev-dependencies]
+loom = "0.7.2"
+
 [features]
-default = ["bump_alloc", "linked_list_alloc", "buddy_alloc", "slab_alloc", "log"]
+default = ["bump_alloc", "linked_list_alloc", "buddy_alloc", "slab_alloc"]
 bump_alloc = []
 linked_list_alloc = []
 buddy_alloc = []
 slab_alloc = []
-log = []

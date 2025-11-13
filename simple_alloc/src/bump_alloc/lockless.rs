@@ -1,14 +1,17 @@
-use crate::common::{
-    ALLOCATOR_UNINITIALIZED, Alloc, BAllocator, BAllocatorError, LocklessAlloc, align_up,
-};
-use conquer_once::spin::OnceCell;
 use core::{
     alloc::Layout,
     ptr::NonNull,
     sync::atomic::{AtomicUsize, Ordering},
 };
-#[cfg(feature = "log")]
+
+use conquer_once::spin::OnceCell;
+#[cfg(debug_assertions)]
 use log::{debug, error};
+
+use crate::common::{
+    ALLOCATOR_UNINITIALIZED, Alloc, AllocInit, AllocState, BAllocator, BAllocatorError,
+    HEAP_END_OVERFLOWED, HEAP_SIZE_ZERO, HEAP_START_NULL, OOM, align_up,
+};
 
 #[derive(Debug)]
 pub struct LocklessBump {
@@ -35,13 +38,16 @@ impl LocklessBump {
     }
 
     unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
-        assert!(heap_start != 0, "Given heap start pointer is NULL");
-        assert!(heap_size > 0, "Heap cannot be 0 in size");
+        debug_assert!(heap_start != 0, "{}", HEAP_START_NULL);
+        debug_assert!(heap_size > 0, "{}", HEAP_SIZE_ZERO);
+        debug_assert!(
+            heap_start + heap_size < usize::MAX,
+            "{}",
+            HEAP_END_OVERFLOWED
+        );
 
         self.start = heap_start;
-        self.end = heap_start
-            .checked_add(heap_size)
-            .expect("Heap end address overflowed");
+        self.end = heap_start + heap_size;
         self.next = AtomicUsize::new(heap_start);
     }
 
@@ -63,17 +69,14 @@ unsafe impl BAllocator for OnceCell<LocklessBump> {
         };
 
         if alloc_end > alloc.end {
-            #[cfg(feature = "log")]
-            error!("Out of memory");
+            #[cfg(debug_assertions)]
+            error!("{}", OOM);
             return Err(BAllocatorError::Oom(layout));
         } else {
             alloc.next.store(alloc_end, Ordering::SeqCst);
             alloc.allocations.fetch_add(1, Ordering::SeqCst);
-            #[cfg(feature = "log")]
-            debug!(
-                "Allocated object {}; layout: {layout:?}",
-                alloc.allocations.load(Ordering::SeqCst)
-            );
+            #[cfg(debug_assertions)]
+            debug!("Allocated object \"{:X}\"; layout: {layout:?}", alloc_start);
             return NonNull::new(alloc_start as *mut u8).ok_or(BAllocatorError::Null);
         }
     }
@@ -84,16 +87,19 @@ unsafe impl BAllocator for OnceCell<LocklessBump> {
         _layout: Layout,
     ) -> Result<(), BAllocatorError> {
         let alloc = self.get().expect(ALLOCATOR_UNINITIALIZED);
-
         let prev = alloc.allocations.fetch_sub(1, Ordering::AcqRel);
-        #[cfg(feature = "log")]
-        debug!("Deallocated object {}; layout: {_layout:?}", prev);
+
         if prev == 1 {
-            #[cfg(feature = "log")]
+            #[cfg(debug_assertions)]
             debug!("All objects deallocated, reseting next pointer to start",);
             alloc.next.store(alloc.start, Ordering::SeqCst);
         }
 
+        #[cfg(debug_assertions)]
+        debug!(
+            "Deallocated object \"{:X}\"; layout: {_layout:?}",
+            _ptr.as_ptr() as usize
+        );
         return Ok(());
     }
 }
@@ -112,16 +118,31 @@ impl Default for Alloc<OnceCell<LocklessBump>> {
     }
 }
 
-impl LocklessAlloc for Alloc<OnceCell<LocklessBump>> {
+impl AllocInit for OnceCell<LocklessBump> {
     unsafe fn init(&self, start: usize, size: usize) {
-        #[cfg(feature = "log")]
+        #[cfg(debug_assertions)]
         debug!("Initialized lockless bump alloc; start: {start:X}, size: {size}");
-        self.alloc.init_once(|| {
+        self.init_once(|| {
             let mut bump = LocklessBump::new();
             unsafe {
                 bump.init(start, size);
             }
             return bump;
         });
+    }
+}
+
+impl AllocState for OnceCell<LocklessBump> {
+    fn remaining(&self) -> usize {
+        let alloc = self.get().expect(ALLOCATOR_UNINITIALIZED);
+
+        return alloc
+            .end
+            .checked_sub(alloc.next.load(Ordering::SeqCst))
+            .unwrap_or_default();
+    }
+    fn allocations(&self) -> usize {
+        let alloc = self.get().expect(ALLOCATOR_UNINITIALIZED);
+        return alloc.allocations.load(Ordering::SeqCst);
     }
 }

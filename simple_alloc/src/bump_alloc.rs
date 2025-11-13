@@ -1,6 +1,7 @@
-use crate::common::{Alloc, ConstAlloc, LockedAlloc, LocklessAlloc};
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
+
+use crate::common::Alloc;
 
 mod bconst;
 mod locked;

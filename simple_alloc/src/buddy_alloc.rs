@@ -8,4 +8,4 @@ mod lockless;
 
 pub use crate::buddy_alloc::locked::LockedBuddy;
 
-pub type LockedBuddyAlloc<'a> = Alloc<Mutex<LockedBuddy<'a>>>;
+pub type LockedBuddyAlloc = Alloc<Mutex<LockedBuddy>>;

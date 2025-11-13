@@ -3,10 +3,15 @@ use core::{
     fmt::{Debug, Formatter, Result as FmtResult},
     ptr::{NonNull, null_mut, write_bytes},
 };
+
 #[cfg(feature = "log")]
 use log::error;
 
-pub const ALLOCATOR_UNINITIALIZED: &str = "Allocator not initialized.";
+pub const HEAP_START_NULL: &str = "Given heap start pointer is NULL";
+pub const HEAP_SIZE_ZERO: &str = "Heap cannot be 0 in size";
+pub const HEAP_END_OVERFLOWED: &str = "Heap end address overflowed";
+pub const ALLOCATOR_UNINITIALIZED: &str = "Allocator not initialized";
+pub const OOM: &str = "Out of memory";
 
 pub fn align_up(addr: usize, align: usize) -> usize {
     let offset = (addr as *const u8).align_offset(align);
@@ -24,7 +29,7 @@ pub enum BAllocatorError {
 impl Debug for BAllocatorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            BAllocatorError::Oom(layout) => write!(f, "Out of Memory: {layout:?}"),
+            BAllocatorError::Oom(layout) => write!(f, "Out of memory: {layout:?}"),
             BAllocatorError::Overflowed => write!(f, "Overflowed memory allocator internal values"),
             BAllocatorError::Alignment(layout) => {
                 write!(f, "Unable to satisfy alignment requirement: {layout:?}")
@@ -71,16 +76,33 @@ pub unsafe trait BAllocator {
     }
 }
 
-pub trait LockedAlloc {
+pub trait AllocInit {
     /// # Safety
     unsafe fn init(&self, start: usize, size: usize);
 }
-pub trait LocklessAlloc {
-    /// # Safety
-    unsafe fn init(&self, start: usize, size: usize);
-}
-pub trait ConstAlloc {}
 
+impl<A: BAllocator + AllocInit> AllocInit for Alloc<A> {
+    unsafe fn init(&self, start: usize, size: usize) {
+        unsafe { self.alloc.init(start, size) };
+    }
+}
+
+pub trait AllocState {
+    fn remaining(&self) -> usize;
+    fn allocations(&self) -> usize;
+}
+
+impl<A: BAllocator + AllocState> AllocState for Alloc<A> {
+    fn remaining(&self) -> usize {
+        return self.alloc.remaining();
+    }
+
+    fn allocations(&self) -> usize {
+        return self.alloc.allocations();
+    }
+}
+
+#[derive(Clone)]
 pub struct Alloc<A: BAllocator> {
     pub(crate) alloc: A,
 }
@@ -110,7 +132,7 @@ unsafe impl<A: BAllocator> GlobalAlloc for Alloc<A> {
                 Ok(mut ptr) => return ptr.as_mut(),
                 Err(_e) => {
                     #[cfg(feature = "log")]
-                    error!("Allocation error: {:?}", _e);
+                    error!("GlobalAlloc, Allocation error: {:?}", _e);
                     return null_mut();
                 }
             }
@@ -125,7 +147,7 @@ unsafe impl<A: BAllocator> GlobalAlloc for Alloc<A> {
                 .try_deallocate(NonNull::new_unchecked(ptr), layout)
             {
                 #[cfg(feature = "log")]
-                error!("Deallocation error: {:?}", _e)
+                error!("GlobalAlloc, Deallocation error: {:?}", _e)
             }
         }
     }

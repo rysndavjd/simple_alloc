@@ -1,21 +1,24 @@
-use crate::{
-    LockedAlloc,
-    common::{Alloc, BAllocator, BAllocatorError, align_up},
-};
 use core::{
     alloc::Layout,
     fmt::{Debug, Formatter, Result as FmtResult},
     mem::{align_of, size_of},
-    ptr::NonNull,
+    ptr::{NonNull, null_mut},
 };
+
+#[cfg(debug_assertions)]
+use log::{debug, error};
 use spin::Mutex;
 
+use crate::common::{
+    Alloc, AllocInit, BAllocator, BAllocatorError, HEAP_SIZE_ZERO, HEAP_START_NULL, OOM, align_up,
+};
+
 #[derive(Debug)]
-pub struct FreeList<'a> {
-    pub next: Option<&'a mut FreeList<'a>>,
+pub struct FreeList {
+    pub next: Option<NonNull<FreeList>>,
 }
 
-impl<'a> FreeList<'a> {
+impl FreeList {
     const fn new() -> Self {
         Self { next: None }
     }
@@ -26,32 +29,37 @@ impl<'a> FreeList<'a> {
 }
 
 #[derive(Debug)]
-pub struct FreeArea<'a> {
-    pub head: Option<&'a mut FreeList<'a>>,
+pub struct FreeArea {
+    pub head: Option<NonNull<FreeList>>,
     pub nr_free: usize,
 }
 
-impl<'a> FreeArea<'a> {
-    const fn new() -> FreeArea<'a> {
+impl FreeArea {
+    const fn new() -> FreeArea {
         FreeArea {
             head: None,
             nr_free: 0,
         }
     }
 
-    fn push(&mut self, value: &'a mut FreeList<'a>) {
-        value.next = self.head.take();
+    fn push(&mut self, mut value: NonNull<FreeList>) {
+        unsafe {
+            value.as_mut().next = self.head;
+        }
         self.head = Some(value);
         self.nr_free += 1;
     }
 
-    fn pop(&mut self) -> Option<&'a mut FreeList<'a>> {
-        if let Some(node) = self.head.take() {
-            self.head = node.next.take();
+    fn pop(&mut self) -> Option<NonNull<FreeList>> {
+        if let Some(mut node) = self.head {
+            unsafe {
+                self.head = node.as_ref().next;
+                node.as_mut().next = None;
+            }
             self.nr_free -= 1;
-            return Some(node);
+            Some(node)
         } else {
-            return None;
+            None
         }
     }
 }
@@ -61,54 +69,55 @@ pub const MIN_ORDER: usize = 0;
 pub const MAX_ORDER: usize = 32;
 pub const NR_MAX_ORDER: usize = MAX_ORDER + 1;
 
-pub struct LockedBuddy<'a> {
-    base: usize,
+pub struct LockedBuddy {
+    base: *mut u8,
     size: usize,
-    list_areas: [FreeArea<'a>; NR_MAX_ORDER],
+    list_areas: [FreeArea; NR_MAX_ORDER],
 }
 
-impl<'a> Debug for LockedBuddy<'a> {
+impl Debug for Alloc<Mutex<LockedBuddy>> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        let alloc = self.alloc.lock();
         writeln!(f, "LockedBuddy {{")?;
-        writeln!(f, "    base: {:?}", self.base)?;
-        writeln!(f, "    size: {}", self.size)?;
+        writeln!(f, "    base: {:?}", alloc.base)?;
+        writeln!(f, "    size: {}", alloc.size)?;
         writeln!(f, "    list_areas: [")?;
-        for (i, v) in self.list_areas.iter().enumerate() {
+        for (i, v) in alloc.list_areas.iter().enumerate() {
             writeln!(f, "    {}: {:?}", i, v)?;
         }
         writeln!(f, "]}}")
     }
 }
 
-impl<'a> Default for LockedBuddy<'a> {
+impl Default for LockedBuddy {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a> LockedBuddy<'a> {
-    const fn new() -> LockedBuddy<'a> {
+impl LockedBuddy {
+    const fn new() -> LockedBuddy {
         LockedBuddy {
-            base: 0,
+            base: null_mut(),
             size: 0,
             list_areas: [const { FreeArea::new() }; NR_MAX_ORDER],
         }
     }
 
     unsafe fn init(&mut self, start: usize, size: usize) {
-        assert!(start != 0, "Given start for heap is NULL.");
-        assert!(size > 0, "Buddy heap cannot be zero in size.");
-        assert!(
+        debug_assert!(start != 0, "{}", HEAP_START_NULL);
+        debug_assert!(size > 0, "{}", HEAP_SIZE_ZERO);
+        debug_assert!(
             size.is_power_of_two(),
-            "Buddy Allocator heap not a power of two."
+            "Buddy Allocator heap not a power of two"
         );
-        assert_eq!(
+        debug_assert_eq!(
             align_up(start, align_of::<FreeList>()),
             start,
-            "Given start is not 8 byte aligned."
+            "Given start is not 8 byte aligned"
         );
 
-        self.base = start;
+        self.base = start as *mut u8;
         self.size = size;
 
         unsafe {
@@ -124,13 +133,13 @@ impl<'a> LockedBuddy<'a> {
         assert_eq!(align_up(addr, align_of::<FreeList>()), addr);
 
         let mut new_item = FreeList::new();
-        new_item.next = self.list_areas[order].head.take();
+        new_item.next = self.list_areas[order].head;
 
         let node_ptr = addr as *mut FreeList;
 
         unsafe {
             node_ptr.write_volatile(new_item);
-            self.list_areas[order].head = Some(&mut *node_ptr);
+            self.list_areas[order].head = NonNull::new(node_ptr);
             self.list_areas[order].nr_free += 1;
         }
     }
@@ -157,11 +166,13 @@ impl<'a> LockedBuddy<'a> {
                     .expect("Calculating buddy_order has underflowed the usize");
                 let block_size = PAGE_SIZE << buddy_order;
 
-                let start_addr = area.start_addr();
-                let buddy_addr = start_addr + block_size;
+                unsafe {
+                    let start_addr = area.as_ref().start_addr();
+                    let buddy_addr = start_addr + block_size;
 
-                self.push_to_order(buddy_order, start_addr);
-                self.push_to_order(buddy_order, buddy_addr);
+                    self.push_to_order(buddy_order, start_addr);
+                    self.push_to_order(buddy_order, buddy_addr);
+                }
             }
         }
         return Err(());
@@ -182,7 +193,7 @@ impl<'a> LockedBuddy<'a> {
                 let node_ptr = new_addr as *mut FreeList;
                 unsafe {
                     node_ptr.write_volatile(FreeList::new());
-                    self.list_areas[current_order + 1].push(&mut *node_ptr);
+                    self.list_areas[current_order + 1].push(NonNull::new_unchecked(node_ptr));
                 }
             }
         }
@@ -194,7 +205,7 @@ impl<'a> LockedBuddy<'a> {
 
         unsafe {
             node_ptr.write_volatile(FreeList::new());
-            self.list_areas[order].push(&mut *node_ptr);
+            self.list_areas[order].push(NonNull::new_unchecked(node_ptr));
         }
     }
 
@@ -216,7 +227,7 @@ impl<'a> LockedBuddy<'a> {
     }
 }
 
-unsafe impl BAllocator for Mutex<LockedBuddy<'_>> {
+unsafe impl BAllocator for Mutex<LockedBuddy> {
     unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let size = LockedBuddy::size_align(layout);
         let mut allocator = self.lock();
@@ -224,17 +235,26 @@ unsafe impl BAllocator for Mutex<LockedBuddy<'_>> {
         let alloc_order = size.ilog2() as usize;
 
         if allocator.split_area_to(alloc_order).is_err() {
+            #[cfg(debug_assertions)]
+            error!("{}", OOM);
             return Err(BAllocatorError::Oom(layout));
         };
 
         let region = match allocator.list_areas[alloc_order].pop() {
             Some(f) => f,
             None => {
+                #[cfg(debug_assertions)]
+                error!("{}", OOM);
                 return Err(BAllocatorError::Oom(layout));
             }
         };
-        let alloc_start = region.start_addr() as *mut u8;
+        let alloc_start = region.as_ptr() as *mut u8;
 
+        #[cfg(debug_assertions)]
+        debug!(
+            "Allocated object \"{:X}\"; layout: {layout:?}",
+            alloc_start as usize
+        );
         return Ok(unsafe { NonNull::new_unchecked(alloc_start) });
     }
 
@@ -251,11 +271,19 @@ unsafe impl BAllocator for Mutex<LockedBuddy<'_>> {
         unsafe { allocator.add_free_area(ptr.as_ptr() as usize, dealloc_order) };
         allocator.combine_free_buddies(ptr.as_ptr() as usize);
 
+        #[cfg(debug_assertions)]
+        debug!(
+            "Deallocated object \"{:X}\"; layout: {layout:?}",
+            ptr.as_ptr() as usize
+        );
         return Ok(());
     }
 }
 
-impl Alloc<Mutex<LockedBuddy<'_>>> {
+unsafe impl Sync for Alloc<Mutex<LockedBuddy>> {}
+unsafe impl Send for Alloc<Mutex<LockedBuddy>> {}
+
+impl Alloc<Mutex<LockedBuddy>> {
     pub const fn new() -> Self {
         Alloc {
             alloc: Mutex::new(LockedBuddy::new()),
@@ -263,24 +291,18 @@ impl Alloc<Mutex<LockedBuddy<'_>>> {
     }
 }
 
-impl Default for Alloc<Mutex<LockedBuddy<'_>>> {
+impl Default for Alloc<Mutex<LockedBuddy>> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LockedAlloc for Mutex<LockedBuddy<'_>> {
+impl AllocInit for Mutex<LockedBuddy> {
     unsafe fn init(&self, start: usize, size: usize) {
         unsafe {
             // #[cfg(feature = "log")]
             // debug!("Initialized locked bump alloc; start: {start:X}, size: {size}");
             self.lock().init(start, size);
         }
-    }
-}
-
-impl LockedAlloc for Alloc<Mutex<LockedBuddy<'_>>> {
-    unsafe fn init(&self, start: usize, size: usize) {
-        unsafe { self.alloc.init(start, size) };
     }
 }
