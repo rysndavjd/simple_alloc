@@ -94,6 +94,9 @@ unsafe impl<const S: usize> BAllocator for ConstBump<S> {
     }
 }
 
+unsafe impl<const S: usize> Sync for Alloc<ConstBump<S>> {}
+unsafe impl<const S: usize> Send for Alloc<ConstBump<S>> {}
+
 impl<const S: usize> Alloc<ConstBump<S>> {
     pub const fn new() -> Self {
         Alloc {

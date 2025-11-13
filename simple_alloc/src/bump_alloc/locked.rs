@@ -99,6 +99,9 @@ unsafe impl BAllocator for Mutex<LockedBump> {
     }
 }
 
+unsafe impl Sync for Alloc<Mutex<LockedBump>> {}
+unsafe impl Send for Alloc<Mutex<LockedBump>> {}
+
 impl Alloc<Mutex<LockedBump>> {
     pub const fn new() -> Self {
         Alloc {

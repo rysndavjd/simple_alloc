@@ -104,6 +104,9 @@ unsafe impl BAllocator for OnceCell<LocklessBump> {
     }
 }
 
+unsafe impl Sync for Alloc<OnceCell<LocklessBump>> {}
+unsafe impl Send for Alloc<OnceCell<LocklessBump>> {}
+
 impl Alloc<OnceCell<LocklessBump>> {
     pub const fn new() -> Self {
         Alloc {
