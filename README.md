@@ -1,13 +1,13 @@
 # Simple_alloc
-A collection of simple, pure Rust memory allocators for `no_std` and embedded environments. Prioritizing simplicity and minimal dependencies, each allocator implements the [`GlobalAlloc`](https://doc.rust-lang.org/alloc/alloc/trait.GlobalAlloc.html) trait, enabling heap allocation in `no_std` environments through Rust's [`alloc`](https://doc.rust-lang.org/alloc/alloc/index.html) crate.
+A collection of simple, pure Rust memory allocators for `no_std` and embedded environments. Prioritizing simplicity and minimal dependencies.
 
 
-| Memory Allocator | Status | Const Variant | 
-|------------------|--------|---------------|
-| [Bump Alloc](https://os.phil-opp.com/allocator-designs/#bump-allocator) | Works | yes |
-| [Linked List Alloc](https://os.phil-opp.com/allocator-designs/#linked-list-allocator) | Inprogress | no |
-| [Buddy Alloc](https://en.wikipedia.org/wiki/Buddy_memory_allocation) |  Inprogress | no |
-| [Slab Alloc](https://en.wikipedia.org/wiki/Slab_allocation) | Inprogress | no |
+| Memory Allocator | Status | Const Variant | Atomic Variant | Blocking Variant | 
+|------------------|--------|---------------|----------------|--------------|
+| [Bump Alloc](https://os.phil-opp.com/allocator-designs/#bump-allocator) | Works | Yes | Yes | Yes |
+| [Linked List Alloc](https://os.phil-opp.com/allocator-designs/#linked-list-allocator) | Inprogress | No | No | No |
+| [Buddy Alloc](https://en.wikipedia.org/wiki/Buddy_memory_allocation) |  Works | No | No | Yes |
+| [Slab Alloc](https://en.wikipedia.org/wiki/Slab_allocation) | Inprogress | No | No | No |
 
 ### Status Definitions
 
@@ -15,10 +15,11 @@ A collection of simple, pure Rust memory allocators for `no_std` and embedded en
 - **Works**: Functionally implemented, not tested fully, odd edge cases may occur.  
 - **Complete**: Fully implemented and tested.
 
-### Const Variant
+### Variants Definitions
 
-Shows if a memory allocator is available as a const variant to be initialized at compile time
-instead of runtime.
+- **Blocking**: Initialized at runtime time utilizing an external heap. Uses [spinlocks](https://en.wikipedia.org/wiki/Spinlock) internally for its logic.
+- **Atomic**: Initialized at runtime time utilizing an external heap. Uses [atomics](https://doc.rust-lang.org/core/sync/atomic/index.html) internally for its logic.
+- **Const**: Initialized at compile time utilizing an internal heap. Uses [atomics](https://doc.rust-lang.org/core/sync/atomic/index.html) internally for its logic as it is usually more performant.
 
 ## Acknowledgments
 
