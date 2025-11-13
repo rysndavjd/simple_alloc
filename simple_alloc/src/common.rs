@@ -4,7 +4,7 @@ use core::{
     ptr::{NonNull, null_mut, write_bytes},
 };
 
-#[cfg(feature = "log")]
+#[cfg(debug_assertions)]
 use log::error;
 
 pub const HEAP_START_NULL: &str = "Given heap start pointer is NULL";
@@ -131,7 +131,7 @@ unsafe impl<A: BAllocator> GlobalAlloc for Alloc<A> {
             match self.alloc.try_allocate(layout) {
                 Ok(mut ptr) => return ptr.as_mut(),
                 Err(_e) => {
-                    #[cfg(feature = "log")]
+                    #[cfg(debug_assertions)]
                     error!("GlobalAlloc, Allocation error: {:?}", _e);
                     return null_mut();
                 }
@@ -146,7 +146,7 @@ unsafe impl<A: BAllocator> GlobalAlloc for Alloc<A> {
                 .alloc
                 .try_deallocate(NonNull::new_unchecked(ptr), layout)
             {
-                #[cfg(feature = "log")]
+                #[cfg(debug_assertions)]
                 error!("GlobalAlloc, Deallocation error: {:?}", _e)
             }
         }
