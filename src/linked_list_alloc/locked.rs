@@ -2,17 +2,18 @@
 // Licensed under MIT OR Apache-2.0
 
 use core::{
-    alloc::{GlobalAlloc, Layout},
+    alloc::Layout,
     mem::{align_of, size_of},
-    ptr::{NonNull, null_mut},
+    ptr::NonNull,
 };
 
 #[cfg(debug_assertions)]
-use log::debug;
+use log::{debug, trace};
 use spin::Mutex;
 
 use crate::common::{
-    ALLOCATOR_UNINITIALIZED, Alloc, AllocInit, BAllocator, BAllocatorError, align_up,
+    Alloc, AllocInit, BAllocator, BAllocatorError, HEAP_END_OVERFLOWED, HEAP_SIZE_ZERO,
+    HEAP_START_NULL, align_up,
 };
 
 #[derive(Debug)]
@@ -50,15 +51,17 @@ impl LockedLinkedList {
         Self { head: Node::new(0) }
     }
 
-    unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
-        debug_assert!(heap_size > 0, "Linked list heap cannot be zero in size.");
+    unsafe fn init(&mut self, start: usize, size: usize) {
+        debug_assert!(start != 0, "{}", HEAP_START_NULL);
+        debug_assert!(size > 0, "{}", HEAP_SIZE_ZERO);
+        debug_assert!(start + size < usize::MAX, "{}", HEAP_END_OVERFLOWED);
         debug_assert_eq!(
-            align_up(heap_start, align_of::<Node>()),
-            heap_start,
-            "Given heap start is not 8 byte aligned."
+            align_up(start, align_of::<Node>()),
+            start,
+            "Given start is not 8 byte aligned"
         );
         unsafe {
-            self.add_free_region(heap_start, heap_size);
+            self.add_free_region(start, size);
         }
     }
 
@@ -86,7 +89,12 @@ impl LockedLinkedList {
         let node_ptr = addr as *mut Node;
 
         unsafe {
-            node_ptr.write(new_node);
+            #[cfg(debug_assertions)]
+            trace!(
+                "Added free region: {:?}, at Addr: {:#X}",
+                new_node, node_ptr as usize
+            );
+            node_ptr.write_volatile(new_node);
             self.head.next = Some(&mut *node_ptr)
         }
     }
@@ -142,17 +150,18 @@ unsafe impl BAllocator for Mutex<LockedLinkedList> {
         if let Some((region, alloc_start)) = allocator.find_region(size, align) {
             let alloc_end = match alloc_start.checked_add(size) {
                 Some(t) => t,
-                None => return Err(BAllocatorError::Oom(layout)),
+                None => return Err(BAllocatorError::Oom(Some(layout))),
             };
-            let excess_size = region.end_addr() - alloc_end;
-            if excess_size > 0 {
-                unsafe {
+            match region.end_addr().checked_sub(alloc_end) {
+                Some(excess_size) => unsafe {
                     allocator.add_free_region(alloc_end, excess_size);
-                }
+                },
+                None => return Err(BAllocatorError::Underflowed),
             }
+
             return Ok(unsafe { NonNull::new_unchecked(alloc_start as *mut u8) });
         } else {
-            return Err(BAllocatorError::Oom(layout));
+            return Err(BAllocatorError::Oom(Some(layout)));
         }
     }
 
@@ -192,7 +201,7 @@ impl AllocInit for Mutex<LockedLinkedList> {
     unsafe fn init(&self, start: usize, size: usize) {
         unsafe {
             #[cfg(debug_assertions)]
-            debug!("Initialized locked bump alloc; start: {start:X}, size: {size}");
+            debug!("Initialized locked linked list alloc; start: {start:#X}, size: {size}");
             self.lock().init(start, size);
         }
     }

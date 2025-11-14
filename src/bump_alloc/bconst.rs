@@ -56,7 +56,7 @@ unsafe impl<const S: usize> BAllocator for ConstBump<S> {
         if alloc_end > self.heap_end() {
             #[cfg(debug_assertions)]
             error!("{}", OOM);
-            return Err(BAllocatorError::Oom(layout));
+            return Err(BAllocatorError::Oom(Some(layout)));
         } else {
             self.offset.store(
                 match alloc_end.checked_sub(self.heap_start()) {

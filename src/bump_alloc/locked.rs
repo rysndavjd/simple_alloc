@@ -65,7 +65,7 @@ unsafe impl BAllocator for Mutex<LockedBump> {
         if alloc_end > bump.end {
             #[cfg(debug_assertions)]
             error!("{}", OOM);
-            return Err(BAllocatorError::Oom(layout));
+            return Err(BAllocatorError::Oom(Some(layout)));
         } else {
             bump.next = alloc_end;
             bump.allocations += 1;
@@ -120,7 +120,7 @@ impl AllocInit for Mutex<LockedBump> {
     unsafe fn init(&self, start: usize, size: usize) {
         unsafe {
             #[cfg(debug_assertions)]
-            debug!("Initialized locked bump alloc; start: {start:X}, size: {size}");
+            debug!("Initialized locked bump alloc; start: {start:#X}, size: {size}");
             self.lock().init(start, size);
         }
     }

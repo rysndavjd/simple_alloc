@@ -6,7 +6,7 @@ use core::{
 };
 
 #[cfg(debug_assertions)]
-use log::{debug, error};
+use log::{debug, error, trace};
 use spin::Mutex;
 
 use crate::common::{
@@ -135,11 +135,16 @@ impl LockedBuddy {
         let mut new_item = FreeList::new();
         new_item.next = self.list_areas[order].head;
 
-        let node_ptr = addr as *mut FreeList;
+        let item_ptr = addr as *mut FreeList;
 
         unsafe {
-            node_ptr.write_volatile(new_item);
-            self.list_areas[order].head = NonNull::new(node_ptr);
+            #[cfg(debug_assertions)]
+            trace!(
+                "Wrote item: {:?}, at Addr: {:#X}",
+                new_item, item_ptr as usize
+            );
+            item_ptr.write_volatile(new_item);
+            self.list_areas[order].head = NonNull::new(item_ptr);
             self.list_areas[order].nr_free += 1;
         }
     }
@@ -149,21 +154,23 @@ impl LockedBuddy {
      * or return if there is no more memory left.
      */
     #[allow(clippy::result_unit_err)]
-    fn split_area_to(&mut self, target_order: usize) -> Result<(), ()> {
+    fn split_area_to(&mut self, target_order: usize) -> Result<(), BAllocatorError> {
         let source_order = (target_order..NR_MAX_ORDER)
             .find(|&order| self.list_areas[order].nr_free > 0)
-            .ok_or(())?;
+            .ok_or(BAllocatorError::Oom(None))?;
 
         for current_order in (target_order..=source_order).rev() {
             if self.list_areas[current_order].nr_free > 0 {
                 if current_order == target_order {
                     return Ok(());
                 }
-                let area = self.list_areas[current_order].pop().ok_or(())?;
+                let area = self.list_areas[current_order]
+                    .pop()
+                    .ok_or(BAllocatorError::Oom(None))?;
 
                 let buddy_order = current_order
                     .checked_sub(1) // This should normally never underflow but checking just in case.
-                    .expect("Calculating buddy_order has underflowed the usize");
+                    .ok_or(BAllocatorError::Underflowed)?;
                 let block_size = PAGE_SIZE << buddy_order;
 
                 unsafe {
@@ -172,10 +179,15 @@ impl LockedBuddy {
 
                     self.push_to_order(buddy_order, start_addr);
                     self.push_to_order(buddy_order, buddy_addr);
+                    #[cfg(debug_assertions)]
+                    trace!(
+                        "Pushed to order: {}, start_addr: {:#X}, buddy_addr: {:#X}",
+                        buddy_order, start_addr, buddy_addr
+                    );
                 }
             }
         }
-        return Err(());
+        return Err(BAllocatorError::Oom(None));
     }
 
     fn combine_free_buddies(&mut self, addr: usize) {
@@ -234,18 +246,14 @@ unsafe impl BAllocator for Mutex<LockedBuddy> {
 
         let alloc_order = size.ilog2() as usize;
 
-        if allocator.split_area_to(alloc_order).is_err() {
-            #[cfg(debug_assertions)]
-            error!("{}", OOM);
-            return Err(BAllocatorError::Oom(layout));
-        };
+        allocator.split_area_to(alloc_order)?;
 
         let region = match allocator.list_areas[alloc_order].pop() {
             Some(f) => f,
             None => {
                 #[cfg(debug_assertions)]
                 error!("{}", OOM);
-                return Err(BAllocatorError::Oom(layout));
+                return Err(BAllocatorError::Oom(Some(layout)));
             }
         };
         let alloc_start = region.as_ptr() as *mut u8;
@@ -300,8 +308,8 @@ impl Default for Alloc<Mutex<LockedBuddy>> {
 impl AllocInit for Mutex<LockedBuddy> {
     unsafe fn init(&self, start: usize, size: usize) {
         unsafe {
-            // #[cfg(feature = "log")]
-            // debug!("Initialized locked bump alloc; start: {start:X}, size: {size}");
+            #[cfg(debug_assertions)]
+            debug!("Initialized locked buddy alloc; start: {start:#X}, size: {size}");
             self.lock().init(start, size);
         }
     }

@@ -19,8 +19,9 @@ pub fn align_up(addr: usize, align: usize) -> usize {
 }
 
 pub enum BAllocatorError {
-    Oom(Layout),
+    Oom(Option<Layout>),
     Overflowed,
+    Underflowed,
     Alignment(Layout),
     Layout(LayoutError),
     Null,
@@ -31,6 +32,9 @@ impl Debug for BAllocatorError {
         match self {
             BAllocatorError::Oom(layout) => write!(f, "Out of memory: {layout:?}"),
             BAllocatorError::Overflowed => write!(f, "Overflowed memory allocator internal values"),
+            BAllocatorError::Underflowed => {
+                write!(f, "Underflowed memory allocator internal values")
+            }
             BAllocatorError::Alignment(layout) => {
                 write!(f, "Unable to satisfy alignment requirement: {layout:?}")
             }

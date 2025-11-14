@@ -71,7 +71,7 @@ unsafe impl BAllocator for OnceCell<LocklessBump> {
         if alloc_end > alloc.end {
             #[cfg(debug_assertions)]
             error!("{}", OOM);
-            return Err(BAllocatorError::Oom(layout));
+            return Err(BAllocatorError::Oom(Some(layout)));
         } else {
             alloc.next.store(alloc_end, Ordering::SeqCst);
             alloc.allocations.fetch_add(1, Ordering::SeqCst);
@@ -124,7 +124,7 @@ impl Default for Alloc<OnceCell<LocklessBump>> {
 impl AllocInit for OnceCell<LocklessBump> {
     unsafe fn init(&self, start: usize, size: usize) {
         #[cfg(debug_assertions)]
-        debug!("Initialized lockless bump alloc; start: {start:X}, size: {size}");
+        debug!("Initialized lockless bump alloc; start: {start:#X}, size: {size}");
         self.init_once(|| {
             let mut bump = LocklessBump::new();
             unsafe {
