@@ -46,7 +46,7 @@ impl<const S: usize> ConstBump<S> {
 }
 
 unsafe impl<const S: usize> BAllocator for ConstBump<S> {
-    unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
+    fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let alloc_start = align_up(self.next(), layout.align());
         let alloc_end = match alloc_start.checked_add(layout.size()) {
             Some(end) => end,
@@ -72,7 +72,7 @@ unsafe impl<const S: usize> BAllocator for ConstBump<S> {
         }
     }
 
-    unsafe fn try_deallocate(
+    fn try_deallocate(
         &self,
         _ptr: NonNull<u8>,
         _layout: Layout,

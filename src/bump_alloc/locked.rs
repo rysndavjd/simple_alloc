@@ -1,4 +1,8 @@
-use core::{alloc::Layout, ptr::NonNull};
+use core::{
+    alloc::Layout,
+    ptr::NonNull,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 #[cfg(debug_assertions)]
 use log::{debug, error};
@@ -19,12 +23,12 @@ pub struct LockedBump {
 
 impl Default for LockedBump {
     fn default() -> Self {
-        Self::new()
+        Self::empty()
     }
 }
 
 impl LockedBump {
-    const fn new() -> Self {
+    const fn empty() -> Self {
         LockedBump {
             start: 0,
             end: 0,
@@ -33,27 +37,13 @@ impl LockedBump {
         }
     }
 
-    unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
-        debug_assert!(heap_start != 0, "{}", HEAP_START_NULL);
-        debug_assert!(heap_size > 0, "{}", HEAP_SIZE_ZERO);
-        debug_assert!(
-            heap_start + heap_size < usize::MAX,
-            "{}",
-            HEAP_END_OVERFLOWED
-        );
-
-        self.start = heap_start;
-        self.end = heap_start + heap_size;
-        self.next = heap_start;
-    }
-
     pub fn allocations(&self) -> usize {
         return self.allocations;
     }
 }
 
 unsafe impl BAllocator for Mutex<LockedBump> {
-    unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
+    fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let mut bump = self.lock();
 
         let alloc_start = align_up(bump.next, layout.align());
@@ -76,11 +66,7 @@ unsafe impl BAllocator for Mutex<LockedBump> {
         }
     }
 
-    unsafe fn try_deallocate(
-        &self,
-        _ptr: NonNull<u8>,
-        _layout: Layout,
-    ) -> Result<(), BAllocatorError> {
+    fn try_deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) -> Result<(), BAllocatorError> {
         let mut bump = self.lock();
 
         bump.allocations -= 1;
@@ -105,7 +91,7 @@ unsafe impl Send for Alloc<Mutex<LockedBump>> {}
 impl Alloc<Mutex<LockedBump>> {
     pub const fn new() -> Self {
         Alloc {
-            alloc: Mutex::new(LockedBump::new()),
+            alloc: Mutex::new(LockedBump::empty()),
         }
     }
 }
@@ -116,13 +102,33 @@ impl Default for Alloc<Mutex<LockedBump>> {
     }
 }
 
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
+
 impl AllocInit for Mutex<LockedBump> {
+    fn is_initialized(&self) -> bool {
+        return INITIALIZED.load(Ordering::Acquire);
+    }
+
     unsafe fn init(&self, start: usize, size: usize) {
-        unsafe {
-            #[cfg(debug_assertions)]
-            debug!("Initialized locked bump alloc; start: {start:#X}, size: {size}");
-            self.lock().init(start, size);
+        if INITIALIZED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            panic!("Bump Allocator has been initialized already");
         }
+
+        assert!(start != 0, "{}", HEAP_START_NULL);
+        assert!(size > 0, "{}", HEAP_SIZE_ZERO);
+        assert!(start + size < usize::MAX, "{}", HEAP_END_OVERFLOWED);
+
+        let mut alloc = self.lock();
+
+        alloc.start = start;
+        alloc.end = start + size;
+        alloc.next = start;
+
+        #[cfg(debug_assertions)]
+        debug!("Initialized locked bump alloc; start: {start:#X}, size: {size}");
     }
 }
 

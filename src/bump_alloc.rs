@@ -7,9 +7,9 @@ mod bconst;
 mod locked;
 mod lockless;
 
-pub use crate::bump_alloc::bconst::ConstBump;
-pub use crate::bump_alloc::locked::LockedBump;
-pub use crate::bump_alloc::lockless::LocklessBump;
+use crate::bump_alloc::bconst::ConstBump;
+use crate::bump_alloc::locked::LockedBump;
+use crate::bump_alloc::lockless::LocklessBump;
 
 pub type LockedBumpAlloc = Alloc<Mutex<LockedBump>>;
 pub type LocklessBumpAlloc = Alloc<OnceCell<LocklessBump>>;

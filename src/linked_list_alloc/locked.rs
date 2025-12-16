@@ -5,6 +5,7 @@ use core::{
     alloc::Layout,
     mem::{align_of, size_of},
     ptr::NonNull,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 #[cfg(debug_assertions)]
@@ -49,20 +50,6 @@ impl Default for LockedLinkedList {
 impl LockedLinkedList {
     const fn new() -> Self {
         Self { head: Node::new(0) }
-    }
-
-    unsafe fn init(&mut self, start: usize, size: usize) {
-        debug_assert!(start != 0, "{}", HEAP_START_NULL);
-        debug_assert!(size > 0, "{}", HEAP_SIZE_ZERO);
-        debug_assert!(start + size < usize::MAX, "{}", HEAP_END_OVERFLOWED);
-        debug_assert_eq!(
-            align_up(start, align_of::<Node>()),
-            start,
-            "Given start is not 8 byte aligned"
-        );
-        unsafe {
-            self.add_free_region(start, size);
-        }
     }
 
     unsafe fn combine_free_regions(&mut self) {
@@ -143,7 +130,7 @@ impl LockedLinkedList {
 }
 
 unsafe impl BAllocator for Mutex<LockedLinkedList> {
-    unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
+    fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let (size, align) = LockedLinkedList::size_align(layout);
         let mut allocator = self.lock();
 
@@ -165,7 +152,7 @@ unsafe impl BAllocator for Mutex<LockedLinkedList> {
         }
     }
 
-    unsafe fn try_deallocate(
+    fn try_deallocate(
         &self,
         ptr: core::ptr::NonNull<u8>,
         layout: Layout,
@@ -197,12 +184,37 @@ impl Default for Alloc<Mutex<LockedLinkedList>> {
     }
 }
 
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
+
 impl AllocInit for Mutex<LockedLinkedList> {
+    fn is_initialized(&self) -> bool {
+        return INITIALIZED.load(Ordering::Acquire);
+    }
+
     unsafe fn init(&self, start: usize, size: usize) {
-        unsafe {
-            #[cfg(debug_assertions)]
-            debug!("Initialized locked linked list alloc; start: {start:#X}, size: {size}");
-            self.lock().init(start, size);
+        if INITIALIZED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            panic!("Bump Allocator has been initialized already");
         }
+
+        assert!(start != 0, "{}", HEAP_START_NULL);
+        assert!(size > 0, "{}", HEAP_SIZE_ZERO);
+        assert!(start + size < usize::MAX, "{}", HEAP_END_OVERFLOWED);
+        assert_eq!(
+            align_up(start, align_of::<Node>()),
+            start,
+            "Given start is not 8 byte aligned"
+        );
+
+        let mut alloc = self.lock();
+
+        unsafe {
+            alloc.add_free_region(start, size);
+        }
+
+        #[cfg(debug_assertions)]
+        debug!("Initialized locked linked list alloc; start: {start:#X}, size: {size}");
     }
 }

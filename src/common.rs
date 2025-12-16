@@ -46,20 +46,13 @@ impl Debug for BAllocatorError {
 
 /// # Safety
 pub unsafe trait BAllocator {
-    /// # Safety
-    unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError>;
+    fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError>;
 
-    /// # Safety
-    unsafe fn try_deallocate(
-        &self,
-        ptr: NonNull<u8>,
-        layout: Layout,
-    ) -> Result<(), BAllocatorError>;
+    fn try_deallocate(&self, ptr: NonNull<u8>, layout: Layout) -> Result<(), BAllocatorError>;
 
-    /// # Safety
-    unsafe fn try_allocate_zeroed(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
+    fn try_allocate_zeroed(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let size = layout.size();
-        let ptr = unsafe { self.try_allocate(layout)? };
+        let ptr = self.try_allocate(layout)?;
 
         unsafe { write_bytes(ptr.as_ptr(), 0, size) };
 
@@ -81,11 +74,18 @@ pub unsafe trait BAllocator {
 }
 
 pub trait AllocInit {
+    fn is_initialized(&self) -> bool;
+
     /// # Safety
+    ///
     unsafe fn init(&self, start: usize, size: usize);
 }
 
 impl<A: BAllocator + AllocInit> AllocInit for Alloc<A> {
+    fn is_initialized(&self) -> bool {
+        self.alloc.is_initialized()
+    }
+
     unsafe fn init(&self, start: usize, size: usize) {
         unsafe { self.alloc.init(start, size) };
     }
@@ -106,26 +106,17 @@ impl<A: BAllocator + AllocState> AllocState for Alloc<A> {
     }
 }
 
-#[derive(Clone)]
 pub struct Alloc<A: BAllocator> {
     pub(crate) alloc: A,
 }
 
 unsafe impl<A: BAllocator> BAllocator for Alloc<A> {
-    unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
-        unsafe {
-            return self.alloc.try_allocate(layout);
-        }
+    fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
+        return self.alloc.try_allocate(layout);
     }
 
-    unsafe fn try_deallocate(
-        &self,
-        ptr: NonNull<u8>,
-        layout: Layout,
-    ) -> Result<(), BAllocatorError> {
-        unsafe {
-            return self.alloc.try_deallocate(ptr, layout);
-        }
+    fn try_deallocate(&self, ptr: NonNull<u8>, layout: Layout) -> Result<(), BAllocatorError> {
+        return self.alloc.try_deallocate(ptr, layout);
     }
 }
 
@@ -146,12 +137,21 @@ unsafe impl<A: BAllocator> GlobalAlloc for Alloc<A> {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         assert!(!ptr.is_null(), "Given pointer to deallocate is NULL.");
         unsafe {
-            if let Err(_e) = self
-                .alloc
-                .try_deallocate(NonNull::new_unchecked(ptr), layout)
+            #[cfg(not(debug_assertions))]
             {
-                #[cfg(debug_assertions)]
-                error!("GlobalAlloc, Deallocation error: {:?}", _e)
+                let _ = self
+                    .alloc
+                    .try_deallocate(NonNull::new_unchecked(ptr), layout);
+            }
+
+            #[cfg(debug_assertions)]
+            {
+                if let Err(e) = self
+                    .alloc
+                    .try_deallocate(NonNull::new_unchecked(ptr), layout)
+                {
+                    error!("GlobalAlloc, Deallocation error: {:?}", e)
+                }
             }
         }
     }

@@ -1,7 +1,7 @@
 use core::{
     alloc::Layout,
     ptr::NonNull,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use conquer_once::spin::OnceCell;
@@ -23,12 +23,12 @@ pub struct LocklessBump {
 
 impl Default for LocklessBump {
     fn default() -> Self {
-        Self::new()
+        Self::empty()
     }
 }
 
 impl LocklessBump {
-    const fn new() -> Self {
+    const fn empty() -> Self {
         LocklessBump {
             start: 0,
             end: 0,
@@ -37,27 +37,13 @@ impl LocklessBump {
         }
     }
 
-    unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
-        debug_assert!(heap_start != 0, "{}", HEAP_START_NULL);
-        debug_assert!(heap_size > 0, "{}", HEAP_SIZE_ZERO);
-        debug_assert!(
-            heap_start + heap_size < usize::MAX,
-            "{}",
-            HEAP_END_OVERFLOWED
-        );
-
-        self.start = heap_start;
-        self.end = heap_start + heap_size;
-        self.next = AtomicUsize::new(heap_start);
-    }
-
     pub fn allocations(&self) -> usize {
         return self.allocations.load(Ordering::SeqCst);
     }
 }
 
 unsafe impl BAllocator for OnceCell<LocklessBump> {
-    unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
+    fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let alloc = self.get().expect(ALLOCATOR_UNINITIALIZED);
 
         let next = alloc.next.load(Ordering::SeqCst);
@@ -81,11 +67,7 @@ unsafe impl BAllocator for OnceCell<LocklessBump> {
         }
     }
 
-    unsafe fn try_deallocate(
-        &self,
-        _ptr: NonNull<u8>,
-        _layout: Layout,
-    ) -> Result<(), BAllocatorError> {
+    fn try_deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) -> Result<(), BAllocatorError> {
         let alloc = self.get().expect(ALLOCATOR_UNINITIALIZED);
         let prev = alloc.allocations.fetch_sub(1, Ordering::AcqRel);
 
@@ -121,17 +103,37 @@ impl Default for Alloc<OnceCell<LocklessBump>> {
     }
 }
 
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
+
 impl AllocInit for OnceCell<LocklessBump> {
+    fn is_initialized(&self) -> bool {
+        return INITIALIZED.load(Ordering::Acquire);
+    }
+
     unsafe fn init(&self, start: usize, size: usize) {
-        #[cfg(debug_assertions)]
-        debug!("Initialized lockless bump alloc; start: {start:#X}, size: {size}");
+        if INITIALIZED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            panic!("Bump Allocator has been initialized already");
+        }
+
         self.init_once(|| {
-            let mut bump = LocklessBump::new();
-            unsafe {
-                bump.init(start, size);
-            }
+            let mut bump = LocklessBump::empty();
+
+            assert!(start != 0, "{}", HEAP_START_NULL);
+            assert!(size > 0, "{}", HEAP_SIZE_ZERO);
+            assert!(start + size < usize::MAX, "{}", HEAP_END_OVERFLOWED);
+
+            bump.start = start;
+            bump.end = start + size;
+            bump.next = AtomicUsize::new(start);
+
             return bump;
         });
+
+        #[cfg(debug_assertions)]
+        debug!("Initialized lockless bump alloc; start: {start:#X}, size: {size}");
     }
 }
 

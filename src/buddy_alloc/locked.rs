@@ -3,6 +3,7 @@ use core::{
     fmt::{Debug, Formatter, Result as FmtResult},
     mem::{align_of, size_of},
     ptr::{NonNull, null_mut},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 #[cfg(debug_assertions)]
@@ -104,29 +105,8 @@ impl LockedBuddy {
         }
     }
 
-    unsafe fn init(&mut self, start: usize, size: usize) {
-        debug_assert!(start != 0, "{}", HEAP_START_NULL);
-        debug_assert!(size > 0, "{}", HEAP_SIZE_ZERO);
-        debug_assert!(
-            size.is_power_of_two(),
-            "Buddy Allocator heap not a power of two"
-        );
-        debug_assert_eq!(
-            align_up(start, align_of::<FreeList>()),
-            start,
-            "Given start is not 8 byte aligned"
-        );
-
-        self.base = start as *mut u8;
-        self.size = size;
-
-        unsafe {
-            self.add_free_area(start, size.div_ceil(PAGE_SIZE).ilog2() as usize);
-        }
-    }
-
     unsafe fn add_free_area(&mut self, addr: usize, order: usize) {
-        debug_assert!(
+        assert!(
             addr != 0,
             "add_free_area: Given free area has a NULL address pointer."
         );
@@ -149,11 +129,6 @@ impl LockedBuddy {
         }
     }
 
-    /*
-     * I am lazy to make proper errors as the error would either cause a panic
-     * or return if there is no more memory left.
-     */
-    #[allow(clippy::result_unit_err)]
     fn split_area_to(&mut self, target_order: usize) -> Result<(), BAllocatorError> {
         let source_order = (target_order..NR_MAX_ORDER)
             .find(|&order| self.list_areas[order].nr_free > 0)
@@ -191,7 +166,7 @@ impl LockedBuddy {
     }
 
     fn combine_free_buddies(&mut self, addr: usize) {
-        debug_assert!(addr != 0, "combine_free_buddies: Given address is NULL");
+        assert!(addr != 0, "combine_free_buddies: Given address is NULL");
         for current_order in MIN_ORDER..=MAX_ORDER {
             let buddy_addr = addr ^ (PAGE_SIZE << current_order);
 
@@ -212,7 +187,7 @@ impl LockedBuddy {
     }
 
     fn push_to_order(&mut self, order: usize, addr: usize) {
-        debug_assert!(addr != 0, "push_to_order: Given address is NULL.");
+        assert!(addr != 0, "push_to_order: Given address is NULL.");
         let node_ptr = addr as *mut FreeList;
 
         unsafe {
@@ -240,7 +215,7 @@ impl LockedBuddy {
 }
 
 unsafe impl BAllocator for Mutex<LockedBuddy> {
-    unsafe fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
+    fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
         let size = LockedBuddy::size_align(layout);
         let mut allocator = self.lock();
 
@@ -266,11 +241,7 @@ unsafe impl BAllocator for Mutex<LockedBuddy> {
         return Ok(unsafe { NonNull::new_unchecked(alloc_start) });
     }
 
-    unsafe fn try_deallocate(
-        &self,
-        ptr: NonNull<u8>,
-        layout: Layout,
-    ) -> Result<(), BAllocatorError> {
+    fn try_deallocate(&self, ptr: NonNull<u8>, layout: Layout) -> Result<(), BAllocatorError> {
         let mut allocator = self.lock();
 
         let size = LockedBuddy::size_align(layout);
@@ -305,12 +276,46 @@ impl Default for Alloc<Mutex<LockedBuddy>> {
     }
 }
 
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+/// Initializes the buddy allocator making it available for use.
+///
+/// See [`AllocInit::init`] for safety requirements.
 impl AllocInit for Mutex<LockedBuddy> {
+    fn is_initialized(&self) -> bool {
+        return INITIALIZED.load(Ordering::Acquire);
+    }
+
     unsafe fn init(&self, start: usize, size: usize) {
-        unsafe {
-            #[cfg(debug_assertions)]
-            debug!("Initialized locked buddy alloc; start: {start:#X}, size: {size}");
-            self.lock().init(start, size);
+        if INITIALIZED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            panic!("Buddy Allocator has been initialized already");
         }
+
+        assert!(start != 0, "{}", HEAP_START_NULL);
+        assert!(size > 0, "{}", HEAP_SIZE_ZERO);
+        assert!(
+            size.is_power_of_two(),
+            "Buddy Allocator heap not a power of two"
+        );
+        assert_eq!(
+            align_up(start, align_of::<FreeList>()),
+            start,
+            "Given start is not 8 byte aligned"
+        );
+
+        let mut alloc = self.lock();
+
+        alloc.base = start as *mut u8;
+        alloc.size = size;
+
+        unsafe {
+            alloc.add_free_area(start, size.div_ceil(PAGE_SIZE).ilog2() as usize);
+        }
+
+        #[cfg(debug_assertions)]
+        debug!("Initialized locked buddy alloc; start: {start:#X}, size: {size}");
     }
 }
