@@ -11,8 +11,9 @@ use log::{debug, error, trace};
 use spin::Mutex;
 
 use crate::common::{
-    ALLOCATOR_UNINITIALIZED, Alloc, AllocInit, BAllocator, BAllocatorError, HEAP_SIZE_ZERO,
-    HEAP_START_NULL, OOM, align_up,
+    ALLOCATOR_ALREADY_INITIALIZED, ALLOCATOR_UNINITIALIZED, Alloc, AllocInit, BAllocator,
+    BAllocatorError, HEAP_END_OVERFLOWED, HEAP_NOT_POWER_TWO, HEAP_SIZE_ZERO, HEAP_START_NULL, OOM,
+    align_up,
 };
 
 #[derive(Debug)]
@@ -66,7 +67,7 @@ impl FreeArea {
     }
 }
 
-pub const PAGE_SIZE: usize = 8;
+pub const MIN_ALLOCATION_SIZE: usize = 8;
 pub const MIN_ORDER: usize = 0;
 pub const MAX_ORDER: usize = 32;
 pub const NR_MAX_ORDER: usize = MAX_ORDER + 1;
@@ -88,12 +89,6 @@ impl Debug for Alloc<Mutex<LockedBuddy>> {
             writeln!(f, "    {}: {:?}", i, v)?;
         }
         writeln!(f, "]}}")
-    }
-}
-
-impl Default for LockedBuddy {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -147,7 +142,7 @@ impl LockedBuddy {
                 let buddy_order = current_order
                     .checked_sub(1) // This should normally never underflow but checking just in case.
                     .ok_or(BAllocatorError::Underflowed)?;
-                let block_size = PAGE_SIZE << buddy_order;
+                let block_size = MIN_ALLOCATION_SIZE << buddy_order;
 
                 unsafe {
                     let start_addr = area.as_ref().start_addr();
@@ -169,9 +164,9 @@ impl LockedBuddy {
     fn combine_free_buddies(&mut self, addr: usize) {
         assert!(addr != 0, "combine_free_buddies: Given address is NULL");
         for current_order in MIN_ORDER..=MAX_ORDER {
-            let buddy_addr = addr ^ (PAGE_SIZE << current_order);
+            let buddy_addr = addr ^ (MIN_ALLOCATION_SIZE << current_order);
 
-            if (buddy_addr ^ addr) == (PAGE_SIZE << current_order)
+            if (buddy_addr ^ addr) == (MIN_ALLOCATION_SIZE << current_order)
                 && self.list_areas[current_order].nr_free >= 2
             {
                 let new_addr = addr.min(buddy_addr);
@@ -204,14 +199,14 @@ impl LockedBuddy {
             .pad_to_align();
 
         let size_bytes = new_layout.size().max(size_of::<FreeList>());
-        let size_in_pages = size_bytes.div_ceil(PAGE_SIZE);
+        let size_min_allocation = size_bytes.div_ceil(MIN_ALLOCATION_SIZE);
 
         assert!(
-            size_in_pages.ilog2() <= MAX_ORDER as u32,
+            size_min_allocation.ilog2() <= MAX_ORDER as u32,
             "Object is too large to allocate in set largest single block in this allocator."
         );
 
-        return size_in_pages;
+        return size_min_allocation;
     }
 }
 
@@ -296,15 +291,13 @@ impl AllocInit for Mutex<LockedBuddy> {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
-            panic!("Buddy Allocator has been initialized already");
+            panic!("{ALLOCATOR_ALREADY_INITIALIZED}");
         }
 
-        assert!(start != 0, "{}", HEAP_START_NULL);
-        assert!(size > 0, "{}", HEAP_SIZE_ZERO);
-        assert!(
-            size.is_power_of_two(),
-            "Buddy Allocator heap not a power of two"
-        );
+        assert!(start != 0, "{HEAP_START_NULL}");
+        assert!(size > 0, "{HEAP_SIZE_ZERO}");
+        assert!(start + size < usize::MAX, "{HEAP_END_OVERFLOWED}");
+        assert!(size.is_power_of_two(), "{HEAP_NOT_POWER_TWO}");
         assert_eq!(
             align_up(start, align_of::<FreeList>()),
             start,
@@ -317,7 +310,7 @@ impl AllocInit for Mutex<LockedBuddy> {
         alloc.size = size;
 
         unsafe {
-            alloc.add_free_area(start, size.div_ceil(PAGE_SIZE).ilog2() as usize);
+            alloc.add_free_area(start, size.div_ceil(MIN_ALLOCATION_SIZE).ilog2() as usize);
         }
 
         #[cfg(debug_assertions)]

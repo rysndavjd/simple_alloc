@@ -100,12 +100,6 @@ impl Alloc<Mutex<LockedBump>> {
     }
 }
 
-impl Default for Alloc<Mutex<LockedBump>> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 impl AllocInit for Mutex<LockedBump> {

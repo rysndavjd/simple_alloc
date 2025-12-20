@@ -10,7 +10,9 @@ use log::error;
 pub const HEAP_START_NULL: &str = "Given heap start pointer is NULL";
 pub const HEAP_SIZE_ZERO: &str = "Heap cannot be 0 in size";
 pub const HEAP_END_OVERFLOWED: &str = "Heap end address overflowed";
+pub const HEAP_NOT_POWER_TWO: &str = "Heap not a power of 2";
 pub const ALLOCATOR_UNINITIALIZED: &str = "Allocator not initialized";
+pub const ALLOCATOR_ALREADY_INITIALIZED: &str = "Allocator was already initialized";
 pub const OOM: &str = "Out of memory";
 
 pub fn align_up(addr: usize, align: usize) -> usize {

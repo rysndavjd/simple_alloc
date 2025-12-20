@@ -42,12 +42,6 @@ pub struct LockedLinkedList {
     allocations: usize,
 }
 
-impl Default for LockedLinkedList {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl LockedLinkedList {
     const fn new() -> Self {
         Self {

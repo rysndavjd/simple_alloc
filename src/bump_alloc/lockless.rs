@@ -9,8 +9,9 @@ use conquer_once::spin::OnceCell;
 use log::{debug, error};
 
 use crate::common::{
-    ALLOCATOR_UNINITIALIZED, Alloc, AllocInit, Allocations, BAllocator, BAllocatorError,
-    HEAP_END_OVERFLOWED, HEAP_SIZE_ZERO, HEAP_START_NULL, OOM, align_up,
+    ALLOCATOR_ALREADY_INITIALIZED, ALLOCATOR_UNINITIALIZED, Alloc, AllocInit, Allocations,
+    BAllocator, BAllocatorError, HEAP_END_OVERFLOWED, HEAP_SIZE_ZERO, HEAP_START_NULL, OOM,
+    align_up,
 };
 
 #[derive(Debug)]
@@ -100,12 +101,6 @@ impl Alloc<OnceCell<LocklessBump>> {
     }
 }
 
-impl Default for Alloc<OnceCell<LocklessBump>> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 impl AllocInit for OnceCell<LocklessBump> {
@@ -118,15 +113,15 @@ impl AllocInit for OnceCell<LocklessBump> {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
-            panic!("Bump Allocator has been initialized already");
+            panic!("{ALLOCATOR_ALREADY_INITIALIZED}");
         }
 
         self.init_once(|| {
             let mut bump = LocklessBump::empty();
 
-            assert!(start != 0, "{}", HEAP_START_NULL);
-            assert!(size > 0, "{}", HEAP_SIZE_ZERO);
-            assert!(start + size < usize::MAX, "{}", HEAP_END_OVERFLOWED);
+            assert!(start != 0, "{HEAP_START_NULL}");
+            assert!(size > 0, "{HEAP_SIZE_ZERO}");
+            assert!(start + size < usize::MAX, "{HEAP_END_OVERFLOWED}");
 
             bump.start = start;
             bump.end = start + size;
