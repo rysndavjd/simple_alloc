@@ -91,16 +91,11 @@ impl<A: BAllocator + AllocInit> AllocInit for Alloc<A> {
     }
 }
 
-pub trait AllocState {
-    fn remaining(&self) -> usize;
+pub trait Allocations {
     fn allocations(&self) -> usize;
 }
 
-impl<A: BAllocator + AllocState> AllocState for Alloc<A> {
-    fn remaining(&self) -> usize {
-        return self.alloc.remaining();
-    }
-
+impl<A: BAllocator + Allocations> Allocations for Alloc<A> {
     fn allocations(&self) -> usize {
         return self.alloc.allocations();
     }

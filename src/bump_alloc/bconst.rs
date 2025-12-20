@@ -8,7 +8,7 @@ use core::{
 #[cfg(debug_assertions)]
 use log::{debug, error};
 
-use crate::common::{Alloc, AllocState, BAllocator, BAllocatorError, OOM, align_up};
+use crate::common::{Alloc, Allocations, BAllocator, BAllocatorError, OOM, align_up};
 
 #[derive(Debug)]
 pub struct ConstBump<const S: usize> {
@@ -72,11 +72,7 @@ unsafe impl<const S: usize> BAllocator for ConstBump<S> {
         }
     }
 
-    fn try_deallocate(
-        &self,
-        _ptr: NonNull<u8>,
-        _layout: Layout,
-    ) -> Result<(), BAllocatorError> {
+    fn try_deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) -> Result<(), BAllocatorError> {
         let prev = self.allocations.fetch_sub(1, Ordering::AcqRel);
 
         if prev == 1 {
@@ -105,10 +101,7 @@ impl<const S: usize> Alloc<ConstBump<S>> {
     }
 }
 
-impl<const S: usize> AllocState for ConstBump<S> {
-    fn remaining(&self) -> usize {
-        return self.heap_end().checked_sub(self.next()).unwrap_or_default();
-    }
+impl<const S: usize> Allocations for ConstBump<S> {
     fn allocations(&self) -> usize {
         return self.allocations.load(Ordering::SeqCst);
     }

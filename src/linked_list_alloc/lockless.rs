@@ -1,8 +1,12 @@
-use core::{alloc::Layout, ptr::NonNull, sync::atomic::AtomicPtr};
+use core::{
+    alloc::Layout,
+    ptr::NonNull,
+    sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
+};
 
 use conquer_once::spin::OnceCell;
 
-use crate::{BAllocator, BAllocatorError};
+use crate::{BAllocator, BAllocatorError, common::ALLOCATOR_UNINITIALIZED};
 
 #[derive(Debug)]
 struct Node {
@@ -26,11 +30,15 @@ impl Node {
 
 pub struct LocklessLinkedList {
     head: Node,
+    allocations: AtomicUsize,
 }
 
 impl LocklessLinkedList {
     const fn new() -> Self {
-        Self { head: Node::new(0) }
+        Self {
+            head: Node::new(0),
+            allocations: AtomicUsize::new(0),
+        }
     }
 
     fn size_align(layout: Layout) -> (usize, usize) {
@@ -45,8 +53,9 @@ impl LocklessLinkedList {
 
 unsafe impl BAllocator for OnceCell<LocklessLinkedList> {
     fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
+        assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
+
         let (size, align) = LocklessLinkedList::size_align(layout);
-        // Safe due to the guarantee that allocator MUST be inited before use
         let mut allocator = unsafe { self.get_unchecked() };
 
         todo!()

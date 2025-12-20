@@ -11,7 +11,8 @@ use log::{debug, error, trace};
 use spin::Mutex;
 
 use crate::common::{
-    Alloc, AllocInit, BAllocator, BAllocatorError, HEAP_SIZE_ZERO, HEAP_START_NULL, OOM, align_up,
+    ALLOCATOR_UNINITIALIZED, Alloc, AllocInit, BAllocator, BAllocatorError, HEAP_SIZE_ZERO,
+    HEAP_START_NULL, OOM, align_up,
 };
 
 #[derive(Debug)]
@@ -216,6 +217,8 @@ impl LockedBuddy {
 
 unsafe impl BAllocator for Mutex<LockedBuddy> {
     fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
+        assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
+
         let size = LockedBuddy::size_align(layout);
         let mut allocator = self.lock();
 
@@ -242,6 +245,8 @@ unsafe impl BAllocator for Mutex<LockedBuddy> {
     }
 
     fn try_deallocate(&self, ptr: NonNull<u8>, layout: Layout) -> Result<(), BAllocatorError> {
+        assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
+
         let mut allocator = self.lock();
 
         let size = LockedBuddy::size_align(layout);

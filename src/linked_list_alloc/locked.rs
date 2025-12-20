@@ -13,8 +13,8 @@ use log::{debug, trace};
 use spin::Mutex;
 
 use crate::common::{
-    Alloc, AllocInit, BAllocator, BAllocatorError, HEAP_END_OVERFLOWED, HEAP_SIZE_ZERO,
-    HEAP_START_NULL, align_up,
+    ALLOCATOR_UNINITIALIZED, Alloc, AllocInit, BAllocator, BAllocatorError, HEAP_END_OVERFLOWED,
+    HEAP_SIZE_ZERO, HEAP_START_NULL, align_up,
 };
 
 #[derive(Debug)]
@@ -39,6 +39,7 @@ impl Node {
 
 pub struct LockedLinkedList {
     head: Node,
+    allocations: usize,
 }
 
 impl Default for LockedLinkedList {
@@ -49,7 +50,10 @@ impl Default for LockedLinkedList {
 
 impl LockedLinkedList {
     const fn new() -> Self {
-        Self { head: Node::new(0) }
+        Self {
+            head: Node::new(0),
+            allocations: 0,
+        }
     }
 
     unsafe fn combine_free_regions(&mut self) {
@@ -131,6 +135,8 @@ impl LockedLinkedList {
 
 unsafe impl BAllocator for Mutex<LockedLinkedList> {
     fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
+        assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
+
         let (size, align) = LockedLinkedList::size_align(layout);
         let mut allocator = self.lock();
 
@@ -157,6 +163,8 @@ unsafe impl BAllocator for Mutex<LockedLinkedList> {
         ptr: core::ptr::NonNull<u8>,
         layout: Layout,
     ) -> Result<(), BAllocatorError> {
+        assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
+
         let (size, _) = LockedLinkedList::size_align(layout);
 
         unsafe {

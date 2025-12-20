@@ -9,8 +9,8 @@ use log::{debug, error};
 use spin::Mutex;
 
 use crate::common::{
-    Alloc, AllocInit, AllocState, BAllocator, BAllocatorError, HEAP_END_OVERFLOWED, HEAP_SIZE_ZERO,
-    HEAP_START_NULL, OOM, align_up,
+    ALLOCATOR_UNINITIALIZED, Alloc, AllocInit, Allocations, BAllocator, BAllocatorError,
+    HEAP_END_OVERFLOWED, HEAP_SIZE_ZERO, HEAP_START_NULL, OOM, align_up,
 };
 
 #[derive(Debug)]
@@ -44,6 +44,8 @@ impl LockedBump {
 
 unsafe impl BAllocator for Mutex<LockedBump> {
     fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
+        assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
+
         let mut bump = self.lock();
 
         let alloc_start = align_up(bump.next, layout.align());
@@ -67,6 +69,8 @@ unsafe impl BAllocator for Mutex<LockedBump> {
     }
 
     fn try_deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) -> Result<(), BAllocatorError> {
+        assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
+
         let mut bump = self.lock();
 
         bump.allocations -= 1;
@@ -132,11 +136,7 @@ impl AllocInit for Mutex<LockedBump> {
     }
 }
 
-impl AllocState for Mutex<LockedBump> {
-    fn remaining(&self) -> usize {
-        let alloc = self.lock();
-        return alloc.end.checked_sub(alloc.next).unwrap_or_default();
-    }
+impl Allocations for Mutex<LockedBump> {
     fn allocations(&self) -> usize {
         let alloc = self.lock();
         return alloc.allocations;

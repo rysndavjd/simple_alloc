@@ -9,7 +9,7 @@ use conquer_once::spin::OnceCell;
 use log::{debug, error};
 
 use crate::common::{
-    ALLOCATOR_UNINITIALIZED, Alloc, AllocInit, AllocState, BAllocator, BAllocatorError,
+    ALLOCATOR_UNINITIALIZED, Alloc, AllocInit, Allocations, BAllocator, BAllocatorError,
     HEAP_END_OVERFLOWED, HEAP_SIZE_ZERO, HEAP_START_NULL, OOM, align_up,
 };
 
@@ -44,8 +44,9 @@ impl LocklessBump {
 
 unsafe impl BAllocator for OnceCell<LocklessBump> {
     fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
-        let alloc = self.get().expect(ALLOCATOR_UNINITIALIZED);
+        assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
 
+        let alloc = unsafe { self.get_unchecked() };
         let next = alloc.next.load(Ordering::SeqCst);
 
         let alloc_start = align_up(next, layout.align());
@@ -68,7 +69,9 @@ unsafe impl BAllocator for OnceCell<LocklessBump> {
     }
 
     fn try_deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) -> Result<(), BAllocatorError> {
-        let alloc = self.get().expect(ALLOCATOR_UNINITIALIZED);
+        assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
+
+        let alloc = unsafe { self.get_unchecked() };
         let prev = alloc.allocations.fetch_sub(1, Ordering::AcqRel);
 
         if prev == 1 {
@@ -137,17 +140,9 @@ impl AllocInit for OnceCell<LocklessBump> {
     }
 }
 
-impl AllocState for OnceCell<LocklessBump> {
-    fn remaining(&self) -> usize {
-        let alloc = self.get().expect(ALLOCATOR_UNINITIALIZED);
-
-        return alloc
-            .end
-            .checked_sub(alloc.next.load(Ordering::SeqCst))
-            .unwrap_or_default();
-    }
+impl Allocations for OnceCell<LocklessBump> {
     fn allocations(&self) -> usize {
         let alloc = self.get().expect(ALLOCATOR_UNINITIALIZED);
-        return alloc.allocations.load(Ordering::SeqCst);
+        return alloc.allocations.load(Ordering::Acquire);
     }
 }
