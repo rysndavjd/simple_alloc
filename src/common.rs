@@ -1,155 +1,254 @@
-use core::{
-    alloc::{GlobalAlloc, Layout, LayoutError},
+use crate::std::{
+    alloc::{GlobalAlloc, Layout},
     fmt::{Debug, Formatter, Result as FmtResult},
-    ptr::{NonNull, null_mut, write_bytes},
+    ptr::{NonNull, copy_nonoverlapping, null_mut},
 };
 
-#[cfg(debug_assertions)]
-use log::error;
+#[inline]
+pub fn align_up(addr: usize, align: usize) -> usize {
+    (addr + align - 1) & !(align - 1)
+}
 
 pub const HEAP_START_NULL: &str = "Given heap start pointer is NULL";
 pub const HEAP_SIZE_ZERO: &str = "Heap cannot be 0 in size";
 pub const HEAP_END_OVERFLOWED: &str = "Heap end address overflowed";
 pub const HEAP_NOT_POWER_TWO: &str = "Heap not a power of 2";
-pub const ALLOCATOR_UNINITIALIZED: &str = "Allocator not initialized";
+pub const ALLOCATOR_UNINITIALIZED: &str = "Allocator is not initialized";
 pub const ALLOCATOR_ALREADY_INITIALIZED: &str = "Allocator was already initialized";
-pub const OOM: &str = "Out of memory";
+pub const NULL_PTR: &str = "Null pointer was given";
 
-pub fn align_up(addr: usize, align: usize) -> usize {
-    let offset = (addr as *const u8).align_offset(align);
-    addr + offset
-}
-
-pub enum BAllocatorError {
-    Oom(Option<Layout>),
-    Overflowed,
-    Underflowed,
+pub enum SAllocatorError {
+    Oom,
+    InternalOverflow,
     Alignment(Layout),
-    Layout(LayoutError),
-    Null,
 }
 
-impl Debug for BAllocatorError {
+impl Debug for SAllocatorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            BAllocatorError::Oom(layout) => write!(f, "Out of memory: {layout:?}"),
-            BAllocatorError::Overflowed => write!(f, "Overflowed memory allocator internal values"),
-            BAllocatorError::Underflowed => {
-                write!(f, "Underflowed memory allocator internal values")
-            }
-            BAllocatorError::Alignment(layout) => {
+            SAllocatorError::Oom => write!(f, "Out of memory"),
+            SAllocatorError::InternalOverflow => write!(f, "Overflowed memory allocator internals"),
+            SAllocatorError::Alignment(layout) => {
                 write!(f, "Unable to satisfy alignment requirement: {layout:?}")
             }
-            BAllocatorError::Layout(e) => write!(f, "Layout Error: {e:?}"),
-            BAllocatorError::Null => write!(f, "NULL pointer"),
         }
+    }
+}
+
+pub struct Alloc<A: SAllocator>(A);
+
+impl<A: SAllocator> From<A> for Alloc<A> {
+    fn from(a: A) -> Self {
+        Alloc(a)
     }
 }
 
 /// # Safety
-pub unsafe trait BAllocator {
-    fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError>;
+pub unsafe trait SAllocator {
+    fn try_allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, SAllocatorError>;
 
-    fn try_deallocate(&self, ptr: NonNull<u8>, layout: Layout) -> Result<(), BAllocatorError>;
-
-    fn try_allocate_zeroed(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
-        let size = layout.size();
+    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, SAllocatorError> {
         let ptr = self.try_allocate(layout)?;
-
-        unsafe { write_bytes(ptr.as_ptr(), 0, size) };
-
-        return Ok(ptr);
+        // SAFETY: `alloc` returns a valid memory block
+        unsafe { (ptr.as_ptr() as *mut u8).write_bytes(0, ptr.len()) }
+        Ok(ptr)
     }
 
     /// # Safety
-    unsafe fn try_deallocate_zeroed(
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout);
+
+    /// # Safety
+    unsafe fn grow(
         &self,
         ptr: NonNull<u8>,
-        layout: Layout,
-    ) -> Result<(), BAllocatorError> {
-        unsafe {
-            write_bytes(ptr.as_ptr(), 0, layout.size());
-            self.try_deallocate(ptr, layout)?;
-        };
-        return Ok(());
-    }
-}
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, SAllocatorError> {
+        debug_assert!(
+            new_layout.size() >= old_layout.size(),
+            "`new_layout.size()` must be greater than or equal to `old_layout.size()`"
+        );
 
-pub trait AllocInit {
-    fn is_initialized(&self) -> bool;
+        let new_ptr = self.try_allocate(new_layout)?;
+
+        // SAFETY: because `new_layout.size()` must be greater than or equal to
+        // `old_layout.size()`, both the old and new memory allocation are valid for reads and
+        // writes for `old_layout.size()` bytes. Also, because the old allocation wasn't yet
+        // deallocated, it cannot overlap `new_ptr`. Thus, the call to `copy_nonoverlapping` is
+        // safe. The safety contract for `dealloc` must be upheld by the caller.
+        unsafe {
+            copy_nonoverlapping(ptr.as_ptr(), new_ptr.as_ptr() as *mut u8, old_layout.size());
+            self.deallocate(ptr, old_layout);
+        }
+
+        Ok(new_ptr)
+    }
 
     /// # Safety
-    ///
-    unsafe fn init(&self, start: usize, size: usize);
-}
+    unsafe fn grow_zeroed(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, SAllocatorError> {
+        debug_assert!(
+            new_layout.size() >= old_layout.size(),
+            "`new_layout.size()` must be greater than or equal to `old_layout.size()`"
+        );
 
-impl<A: BAllocator + AllocInit> AllocInit for Alloc<A> {
-    fn is_initialized(&self) -> bool {
-        self.alloc.is_initialized()
-    }
+        let new_ptr = self.allocate_zeroed(new_layout)?;
 
-    unsafe fn init(&self, start: usize, size: usize) {
-        unsafe { self.alloc.init(start, size) };
-    }
-}
-
-pub trait Allocations {
-    fn allocations(&self) -> usize;
-}
-
-impl<A: BAllocator + Allocations> Allocations for Alloc<A> {
-    fn allocations(&self) -> usize {
-        return self.alloc.allocations();
-    }
-}
-
-pub struct Alloc<A: BAllocator> {
-    pub(crate) alloc: A,
-}
-
-unsafe impl<A: BAllocator> BAllocator for Alloc<A> {
-    fn try_allocate(&self, layout: Layout) -> Result<NonNull<u8>, BAllocatorError> {
-        return self.alloc.try_allocate(layout);
-    }
-
-    fn try_deallocate(&self, ptr: NonNull<u8>, layout: Layout) -> Result<(), BAllocatorError> {
-        return self.alloc.try_deallocate(ptr, layout);
-    }
-}
-
-unsafe impl<A: BAllocator> GlobalAlloc for Alloc<A> {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: because `new_layout.size()` must be greater than or equal to
+        // `old_layout.size()`, both the old and new memory allocation are valid for reads and
+        // writes for `old_layout.size()` bytes. Also, because the old allocation wasn't yet
+        // deallocated, it cannot overlap `new_ptr`. Thus, the call to `copy_nonoverlapping` is
+        // safe. The safety contract for `dealloc` must be upheld by the caller.
         unsafe {
-            match self.alloc.try_allocate(layout) {
-                Ok(mut ptr) => return ptr.as_mut(),
-                Err(_e) => {
-                    #[cfg(debug_assertions)]
-                    error!("GlobalAlloc, Allocation error: {:?}", _e);
-                    return null_mut();
-                }
-            }
+            copy_nonoverlapping(ptr.as_ptr(), new_ptr.as_ptr() as *mut u8, old_layout.size());
+            self.deallocate(ptr, old_layout);
+        }
+
+        Ok(new_ptr)
+    }
+
+    /// # Safety
+    unsafe fn shrink(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, SAllocatorError> {
+        debug_assert!(
+            new_layout.size() <= old_layout.size(),
+            "`new_layout.size()` must be smaller than or equal to `old_layout.size()`"
+        );
+
+        let new_ptr = self.try_allocate(new_layout)?;
+
+        // SAFETY: because `new_layout.size()` must be lower than or equal to
+        // `old_layout.size()`, both the old and new memory allocation are valid for reads and
+        // writes for `new_layout.size()` bytes. Also, because the old allocation wasn't yet
+        // deallocated, it cannot overlap `new_ptr`. Thus, the call to `copy_nonoverlapping` is
+        // safe. The safety contract for `dealloc` must be upheld by the caller.
+        unsafe {
+            copy_nonoverlapping(ptr.as_ptr(), new_ptr.as_ptr() as *mut u8, new_layout.size());
+            self.deallocate(ptr, old_layout);
+        }
+
+        Ok(new_ptr)
+    }
+}
+
+unsafe impl<A: SAllocator> GlobalAlloc for Alloc<A> {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        match self.0.try_allocate(layout) {
+            Ok(ptr) => ptr.as_ptr() as *mut u8,
+            Err(_) => null_mut(),
         }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        assert!(!ptr.is_null(), "Given pointer to deallocate is NULL.");
-        unsafe {
-            #[cfg(not(debug_assertions))]
-            {
-                let _ = self
-                    .alloc
-                    .try_deallocate(NonNull::new_unchecked(ptr), layout);
-            }
+        assert!(!ptr.is_null(), "{NULL_PTR}");
 
-            #[cfg(debug_assertions)]
-            {
-                if let Err(e) = self
-                    .alloc
-                    .try_deallocate(NonNull::new_unchecked(ptr), layout)
-                {
-                    error!("GlobalAlloc, Deallocation error: {:?}", e)
-                }
-            }
+        unsafe {
+            self.0.deallocate(NonNull::new_unchecked(ptr), layout);
         }
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        match self.0.allocate_zeroed(layout) {
+            Ok(ptr) => ptr.as_ptr() as *mut u8,
+            Err(_) => null_mut(),
+        }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, old_layout: Layout, new_size: usize) -> *mut u8 {
+        assert!(!ptr.is_null(), "{NULL_PTR}");
+        let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, old_layout.align()) };
+
+        match unsafe {
+            self.0
+                .grow(NonNull::new_unchecked(ptr), old_layout, new_layout)
+        } {
+            Ok(ptr) => ptr.as_ptr() as *mut u8,
+            Err(_) => null_mut(),
+        }
+    }
+}
+
+#[cfg(feature = "allocator-api")]
+unsafe impl<A: SAllocator> crate::std::alloc::Allocator for Alloc<A> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, crate::std::alloc::AllocError> {
+        match self.0.try_allocate(layout) {
+            Ok(ptr) => Ok(ptr),
+            Err(_) => Err(crate::std::alloc::AllocError),
+        }
+    }
+
+    fn allocate_zeroed(
+        &self,
+        layout: Layout,
+    ) -> Result<NonNull<[u8]>, crate::std::alloc::AllocError> {
+        match self.0.allocate_zeroed(layout) {
+            Ok(ptr) => Ok(ptr),
+            Err(_) => Err(crate::std::alloc::AllocError),
+        }
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        unsafe { self.0.deallocate(ptr, layout) };
+    }
+
+    unsafe fn grow(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, crate::std::alloc::AllocError> {
+        match unsafe { self.0.grow(ptr, old_layout, new_layout) } {
+            Ok(ptr) => Ok(ptr),
+            Err(_) => Err(crate::std::alloc::AllocError),
+        }
+    }
+
+    unsafe fn grow_zeroed(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, crate::std::alloc::AllocError> {
+        match unsafe { self.0.grow_zeroed(ptr, old_layout, new_layout) } {
+            Ok(ptr) => Ok(ptr),
+            Err(_) => Err(crate::std::alloc::AllocError),
+        }
+    }
+
+    unsafe fn shrink(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, crate::std::alloc::AllocError> {
+        match unsafe { self.0.shrink(ptr, old_layout, new_layout) } {
+            Ok(ptr) => Ok(ptr),
+            Err(_) => Err(crate::std::alloc::AllocError),
+        }
+    }
+}
+
+pub trait Initialization {
+    fn is_initialized(&self) -> bool;
+
+    /// # Safety
+    unsafe fn init(&self, start: usize, size: usize);
+}
+
+impl<A: SAllocator + Initialization> Initialization for Alloc<A> {
+    fn is_initialized(&self) -> bool {
+        self.0.is_initialized()
+    }
+
+    unsafe fn init(&self, start: usize, size: usize) {
+        unsafe { self.0.init(start, size) };
     }
 }
