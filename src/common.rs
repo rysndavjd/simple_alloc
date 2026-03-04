@@ -237,6 +237,8 @@ unsafe impl<A: SAllocator> crate::std::alloc::Allocator for Alloc<A> {
 }
 
 pub trait Initialization {
+    fn new_uninitialized() -> Self;
+
     fn is_initialized(&self) -> bool;
 
     /// # Safety
@@ -244,6 +246,10 @@ pub trait Initialization {
 }
 
 impl<A: SAllocator + Initialization> Initialization for Alloc<A> {
+    fn new_uninitialized() -> Self {
+        Alloc(A::new_uninitialized())
+    }
+
     fn is_initialized(&self) -> bool {
         self.0.is_initialized()
     }

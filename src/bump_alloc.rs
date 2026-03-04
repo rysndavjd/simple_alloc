@@ -1,7 +1,7 @@
 use crate::{
     common::{
-        ALLOCATOR_ALREADY_INITIALIZED, Alloc, HEAP_END_OVERFLOWED, HEAP_SIZE_ZERO, HEAP_START_NULL,
-        Initialization, SAllocator, SAllocatorError, align_up,
+        ALLOCATOR_ALREADY_INITIALIZED, ALLOCATOR_UNINITIALIZED, Alloc, HEAP_END_OVERFLOWED,
+        HEAP_SIZE_ZERO, HEAP_START_NULL, Initialization, SAllocator, SAllocatorError, align_up,
     },
     std::{
         alloc::Layout,
@@ -23,9 +23,12 @@ pub struct Bump {
 
 unsafe impl SAllocator for UnsafeCell<Bump> {
     fn try_allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, SAllocatorError> {
+        debug_assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
         let alloc = unsafe { &*self.get() };
 
         if layout.size() == 0 {
+            alloc.allocations.fetch_add(1, Ordering::AcqRel);
+
             unsafe {
                 return Ok(NonNull::new_unchecked(slice_from_raw_parts_mut(
                     layout.align() as *mut u8,
@@ -71,6 +74,7 @@ unsafe impl SAllocator for UnsafeCell<Bump> {
     }
 
     unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {
+        debug_assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
         let alloc = unsafe { &*self.get() };
 
         let prev = alloc.allocations.fetch_sub(1, Ordering::AcqRel);
@@ -87,6 +91,15 @@ unsafe impl Sync for Alloc<UnsafeCell<Bump>> {}
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 impl Initialization for UnsafeCell<Bump> {
+    fn new_uninitialized() -> Self {
+        UnsafeCell::new(Bump {
+            start: 0,
+            end: 0,
+            next: AtomicUsize::new(0),
+            allocations: AtomicUsize::new(0),
+        })
+    }
+
     fn is_initialized(&self) -> bool {
         INITIALIZED.load(Ordering::Acquire)
     }
@@ -103,10 +116,14 @@ impl Initialization for UnsafeCell<Bump> {
 
         assert!(start != 0, "{HEAP_START_NULL}");
         assert!(size > 0, "{HEAP_SIZE_ZERO}");
-        assert!(start + size < usize::MAX, "{HEAP_END_OVERFLOWED}");
+
+        let end = match start.checked_add(size) {
+            Some(end) => end,
+            None => panic!("{HEAP_END_OVERFLOWED}"),
+        };
 
         bump.start = start;
-        bump.end = start + size;
+        bump.end = end;
         bump.next = AtomicUsize::new(start);
         bump.allocations = AtomicUsize::new(0);
     }
