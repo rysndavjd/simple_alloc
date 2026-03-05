@@ -258,3 +258,28 @@ impl<A: SAllocator + Initialization> Initialization for Alloc<A> {
         unsafe { self.0.init(start, size) };
     }
 }
+
+pub trait Allocations {
+    fn allocations(&self) -> usize;
+}
+
+impl<A: SAllocator + Allocations> Allocations for Alloc<A> {
+    fn allocations(&self) -> usize {
+        self.0.allocations()
+    }
+}
+
+pub trait Bytes {
+    fn remaining_bytes(&self) -> usize;
+    fn allocated_bytes(&self) -> usize;
+}
+
+impl<A: SAllocator + Bytes> Bytes for Alloc<A> {
+    fn remaining_bytes(&self) -> usize {
+        self.0.remaining_bytes()
+    }
+
+    fn allocated_bytes(&self) -> usize {
+        self.0.allocated_bytes()
+    }
+}

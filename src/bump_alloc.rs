@@ -1,7 +1,9 @@
 use crate::{
+    Bytes,
     common::{
-        ALLOCATOR_ALREADY_INITIALIZED, ALLOCATOR_UNINITIALIZED, Alloc, HEAP_END_OVERFLOWED,
-        HEAP_SIZE_ZERO, HEAP_START_NULL, Initialization, SAllocator, SAllocatorError, align_up,
+        ALLOCATOR_ALREADY_INITIALIZED, ALLOCATOR_UNINITIALIZED, Alloc, Allocations,
+        HEAP_END_OVERFLOWED, HEAP_NOT_POWER_TWO, HEAP_SIZE_ZERO, HEAP_START_NULL, Initialization,
+        SAllocator, SAllocatorError, align_up,
     },
     std::{
         alloc::Layout,
@@ -115,6 +117,7 @@ impl Initialization for UnsafeCell<Bump> {
         let bump = unsafe { &mut *self.get() };
 
         assert!(start != 0, "{HEAP_START_NULL}");
+        assert!(start.is_power_of_two(), "{HEAP_NOT_POWER_TWO}");
         assert!(size > 0, "{HEAP_SIZE_ZERO}");
 
         let end = match start.checked_add(size) {
@@ -126,5 +129,30 @@ impl Initialization for UnsafeCell<Bump> {
         bump.end = end;
         bump.next = AtomicUsize::new(start);
         bump.allocations = AtomicUsize::new(0);
+    }
+}
+
+impl Allocations for UnsafeCell<Bump> {
+    fn allocations(&self) -> usize {
+        let alloc = unsafe { &*self.get() };
+        alloc.allocations.load(Ordering::Acquire)
+    }
+}
+
+impl Bytes for UnsafeCell<Bump> {
+    fn remaining_bytes(&self) -> usize {
+        let alloc = unsafe { &*self.get() };
+
+        let next = alloc.next.load(Ordering::Acquire);
+
+        alloc.end.saturating_sub(next)
+    }
+
+    fn allocated_bytes(&self) -> usize {
+        let alloc = unsafe { &*self.get() };
+
+        let next = alloc.next.load(Ordering::Acquire);
+
+        next.saturating_sub(alloc.start)
     }
 }

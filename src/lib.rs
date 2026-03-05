@@ -12,4 +12,4 @@ mod common;
 #[cfg(feature = "bump_alloc")]
 pub use bump_alloc::BumpAlloc;
 
-pub use crate::common::Initialization;
+pub use crate::common::{Allocations, Bytes, Initialization};
