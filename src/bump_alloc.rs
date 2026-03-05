@@ -8,6 +8,7 @@ use crate::{
     std::{
         alloc::Layout,
         cell::UnsafeCell,
+        hint::spin_loop,
         ptr::{NonNull, slice_from_raw_parts_mut},
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     },
@@ -69,7 +70,7 @@ unsafe impl SAllocator for UnsafeCell<Bump> {
                     };
                 }
                 Err(_) => {
-                    continue;
+                    spin_loop();
                 }
             }
         }
