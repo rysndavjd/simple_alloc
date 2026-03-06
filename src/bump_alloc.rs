@@ -1,9 +1,9 @@
 use crate::{
     Bytes,
     common::{
-        ALLOCATOR_ALREADY_INITIALIZED, ALLOCATOR_UNINITIALIZED, Alloc, Allocations,
+        ALLOCATOR_ALREADY_INITIALIZED, ALLOCATOR_UNINITIALIZED, Allocations, AllocatorError,
         HEAP_END_OVERFLOWED, HEAP_NOT_POWER_TWO, HEAP_SIZE_ZERO, HEAP_START_NULL, Initialization,
-        SAllocator, SAllocatorError, align_up,
+        align_up, impl_global_alloc,
     },
     std::{
         alloc::Layout,
@@ -14,20 +14,21 @@ use crate::{
     },
 };
 
-pub type BumpAlloc = Alloc<UnsafeCell<Bump>>;
-
 #[derive(Debug)]
-pub struct Bump {
+struct Bump {
     start: usize,
     end: usize,
     next: AtomicUsize,
     allocations: AtomicUsize,
 }
 
-unsafe impl SAllocator for UnsafeCell<Bump> {
-    fn try_allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, SAllocatorError> {
+#[derive(Debug)]
+pub struct BumpAlloc(UnsafeCell<Bump>);
+
+impl BumpAlloc {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocatorError> {
         debug_assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
-        let alloc = unsafe { &*self.get() };
+        let alloc = unsafe { &*(self.0).get() };
 
         if layout.size() == 0 {
             alloc.allocations.fetch_add(1, Ordering::AcqRel);
@@ -47,11 +48,11 @@ unsafe impl SAllocator for UnsafeCell<Bump> {
 
             let alloc_end = match alloc_start.checked_add(layout.size()) {
                 Some(addr) => addr,
-                None => return Err(SAllocatorError::InternalOverflow),
+                None => return Err(AllocatorError::InternalOverflow),
             };
 
             if alloc_end > alloc.end {
-                return Err(SAllocatorError::Oom);
+                return Err(AllocatorError::Oom);
             }
 
             match alloc.next.compare_exchange_weak(
@@ -78,7 +79,7 @@ unsafe impl SAllocator for UnsafeCell<Bump> {
 
     unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {
         debug_assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
-        let alloc = unsafe { &*self.get() };
+        let alloc = unsafe { &*(self.0).get() };
 
         let prev = alloc.allocations.fetch_sub(1, Ordering::AcqRel);
 
@@ -88,19 +89,28 @@ unsafe impl SAllocator for UnsafeCell<Bump> {
     }
 }
 
-unsafe impl Send for Alloc<UnsafeCell<Bump>> {}
-unsafe impl Sync for Alloc<UnsafeCell<Bump>> {}
+unsafe impl Send for BumpAlloc {}
+unsafe impl Sync for BumpAlloc {}
+
+impl_global_alloc! {
+    BumpAlloc
+}
+
+#[cfg(feature = "allocator-api")]
+crate::common::impl_allocator_api! {
+    BumpAlloc
+}
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
-impl Initialization for UnsafeCell<Bump> {
+impl Initialization for BumpAlloc {
     fn new_uninitialized() -> Self {
-        UnsafeCell::new(Bump {
+        BumpAlloc(UnsafeCell::new(Bump {
             start: 0,
             end: 0,
             next: AtomicUsize::new(0),
             allocations: AtomicUsize::new(0),
-        })
+        }))
     }
 
     fn is_initialized(&self) -> bool {
@@ -115,7 +125,7 @@ impl Initialization for UnsafeCell<Bump> {
             panic!("{ALLOCATOR_ALREADY_INITIALIZED}");
         }
 
-        let bump = unsafe { &mut *self.get() };
+        let bump = unsafe { &mut *(self.0).get() };
 
         assert!(start != 0, "{HEAP_START_NULL}");
         assert!(start.is_power_of_two(), "{HEAP_NOT_POWER_TWO}");
@@ -133,16 +143,16 @@ impl Initialization for UnsafeCell<Bump> {
     }
 }
 
-impl Allocations for UnsafeCell<Bump> {
+impl Allocations for BumpAlloc {
     fn allocations(&self) -> usize {
-        let alloc = unsafe { &*self.get() };
+        let alloc = unsafe { &*(self.0).get() };
         alloc.allocations.load(Ordering::Acquire)
     }
 }
 
-impl Bytes for UnsafeCell<Bump> {
+impl Bytes for BumpAlloc {
     fn remaining_bytes(&self) -> usize {
-        let alloc = unsafe { &*self.get() };
+        let alloc = unsafe { &*(self.0).get() };
 
         let next = alloc.next.load(Ordering::Acquire);
 
@@ -150,7 +160,7 @@ impl Bytes for UnsafeCell<Bump> {
     }
 
     fn allocated_bytes(&self) -> usize {
-        let alloc = unsafe { &*self.get() };
+        let alloc = unsafe { &*(self.0).get() };
 
         let next = alloc.next.load(Ordering::Acquire);
 
