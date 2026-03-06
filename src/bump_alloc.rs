@@ -2,15 +2,15 @@ use crate::{
     Bytes,
     common::{
         ALLOCATOR_ALREADY_INITIALIZED, ALLOCATOR_UNINITIALIZED, Allocations, AllocatorError,
-        HEAP_END_OVERFLOWED, HEAP_NOT_POWER_TWO, HEAP_SIZE_ZERO, HEAP_START_NULL, Initialization,
-        align_up, impl_global_alloc,
+        HEAP_END_OVERFLOWED, HEAP_SIZE_ZERO, HEAP_START_NULL, Initialization, align_up,
+        impl_global_alloc,
     },
     std::{
         alloc::Layout,
         cell::UnsafeCell,
         hint::spin_loop,
         ptr::{NonNull, slice_from_raw_parts_mut},
-        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+        sync::atomic::{AtomicUsize, Ordering},
     },
 };
 
@@ -26,9 +26,13 @@ struct Bump {
 pub struct BumpAlloc(UnsafeCell<Bump>);
 
 impl BumpAlloc {
+    fn get_inner(&self) -> &Bump {
+        unsafe { &*(self.0).get() }
+    }
+
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocatorError> {
         debug_assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
-        let alloc = unsafe { &*(self.0).get() };
+        let alloc = self.get_inner();
 
         if layout.size() == 0 {
             alloc.allocations.fetch_add(1, Ordering::AcqRel);
@@ -77,15 +81,17 @@ impl BumpAlloc {
         }
     }
 
-    unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {
-        debug_assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
-        let alloc = unsafe { &*(self.0).get() };
+    unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {}
 
-        let prev = alloc.allocations.fetch_sub(1, Ordering::AcqRel);
+    /// # Safety
+    /// Caller must ensure no live references are allocated before calling
+    /// this function. Calling reset while allocations are in use will
+    /// cause undefined behavior.
+    pub unsafe fn reset(&self) {
+        let alloc = self.get_inner();
 
-        if prev == 1 {
-            alloc.next.store(alloc.start, Ordering::Release);
-        }
+        alloc.next.store(alloc.start, Ordering::Release);
+        alloc.allocations.store(0, Ordering::Release);
     }
 }
 
@@ -101,8 +107,6 @@ crate::common::impl_allocator_api! {
     BumpAlloc
 }
 
-static INITIALIZED: AtomicBool = AtomicBool::new(false);
-
 impl Initialization for BumpAlloc {
     fn new_uninitialized() -> Self {
         BumpAlloc(UnsafeCell::new(Bump {
@@ -114,21 +118,19 @@ impl Initialization for BumpAlloc {
     }
 
     fn is_initialized(&self) -> bool {
-        INITIALIZED.load(Ordering::Acquire)
+        let alloc = self.get_inner();
+
+        alloc.start != 0 && alloc.end != 0
     }
 
     unsafe fn init(&self, start: usize, size: usize) {
-        if INITIALIZED
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
+        if self.is_initialized() {
             panic!("{ALLOCATOR_ALREADY_INITIALIZED}");
         }
 
         let bump = unsafe { &mut *(self.0).get() };
 
         assert!(start != 0, "{HEAP_START_NULL}");
-        assert!(start.is_power_of_two(), "{HEAP_NOT_POWER_TWO}");
         assert!(size > 0, "{HEAP_SIZE_ZERO}");
 
         let end = match start.checked_add(size) {
@@ -145,14 +147,14 @@ impl Initialization for BumpAlloc {
 
 impl Allocations for BumpAlloc {
     fn allocations(&self) -> usize {
-        let alloc = unsafe { &*(self.0).get() };
+        let alloc = self.get_inner();
         alloc.allocations.load(Ordering::Acquire)
     }
 }
 
 impl Bytes for BumpAlloc {
     fn remaining_bytes(&self) -> usize {
-        let alloc = unsafe { &*(self.0).get() };
+        let alloc = self.get_inner();
 
         let next = alloc.next.load(Ordering::Acquire);
 
@@ -160,7 +162,7 @@ impl Bytes for BumpAlloc {
     }
 
     fn allocated_bytes(&self) -> usize {
-        let alloc = unsafe { &*(self.0).get() };
+        let alloc = self.get_inner();
 
         let next = alloc.next.load(Ordering::Acquire);
 
