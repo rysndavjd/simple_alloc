@@ -71,8 +71,8 @@ struct Bin {
     tail: Option<NonNull<Page>>,
 }
 
-struct Ralloc<const MAX_ORDER: usize> {
-    page_alloc: Buddy<MAX_ORDER>,
+struct Ralloc<const NR_ORDER: usize> {
+    page_alloc: Buddy<NR_ORDER>,
     bins: [Mutex<Bin>; SizeClass::NUM_BINNED],
 }
 

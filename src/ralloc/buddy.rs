@@ -2,18 +2,17 @@ use spin::Mutex;
 
 use crate::{
     ralloc::{PAGE_SHIFT, PAGE_SIZE},
-    std::{
-        ptr::NonNull,
-        sync::atomic::{AtomicPtr, Ordering},
-    },
+    std::{alloc::Layout, ptr::NonNull},
 };
 
 const fn max_order(heap_size: usize) -> usize {
     (heap_size / PAGE_SIZE).ilog2() as usize
 }
 
-enum BuddyErrors {
-    AreaOrderEmpty,
+enum BuddyError {
+    OrderZeroCannotBeSplit,
+    SourceAreaEmpty,
+    InvalidLayout,
 }
 
 struct Chunk {
@@ -81,6 +80,17 @@ pub struct Buddy<const NR_ORDER: usize> {
 }
 
 impl<const NR_ORDER: usize> Buddy<NR_ORDER> {
+    /// Aligns given layout to [`PAGE_SIZE`] and returns how
+    /// many pages this layout takes up.
+    fn size_align_pages(layout: Layout) -> Result<usize, BuddyError> {
+        let aligned_layout = layout
+            .align_to(PAGE_SIZE)
+            .map_err(|_| BuddyError::InvalidLayout)?
+            .pad_to_align();
+
+        return Ok(aligned_layout.size().div_ceil(PAGE_SIZE));
+    }
+
     fn add_area(&mut self, addr: NonNull<u8>, order: usize) {
         assert!(addr.as_ptr() as usize & (PAGE_SIZE - 1) == 0);
 
@@ -98,25 +108,46 @@ impl<const NR_ORDER: usize> Buddy<NR_ORDER> {
         }
     }
 
-    fn split(&mut self, source_order: usize, target_order: usize) -> Result<(), BuddyErrors> {
-        debug_assert!(source_order > target_order);
-
-        let mut source_area = self.areas_list[source_order].lock();
-
-        if source_area.nr_free == 0 {
-            return Err(BuddyErrors::AreaOrderEmpty);
+    fn split_down(&mut self, source_order: usize) -> Result<(), BuddyError> {
+        if source_order == 0 {
+            return Err(BuddyError::OrderZeroCannotBeSplit);
         }
 
-        let mut target_area = self.areas_list[target_order].lock();
+        let source_chunk = {
+            let mut source_area = self.areas_list[source_order].lock();
 
-        let source_chunk = source_area
-            .pop()
-            .expect("Source area should contain atleast 1 chunk");
+            if source_area.nr_free == 0 {
+                return Err(BuddyError::SourceAreaEmpty);
+            }
+
+            source_area
+                .pop()
+                .expect("Source area should contain atleast 1 chunk")
+        };
+
+        let mut target_area = self.areas_list[source_order - 1].lock();
 
         unsafe {
-            let buddy_addr = source_chunk.as_ref().buddy_addr(target_order);
+            let buddy = NonNull::new_unchecked(
+                source_chunk.as_ref().buddy_addr(source_order - 1) as *mut Chunk
+            );
+            buddy.write(Chunk::new());
 
-            todo!()
+            target_area.push(source_chunk);
+            target_area.push(buddy);
         }
+
+        return Ok(());
+    }
+
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, BuddyError> {
+        let nr_pages = Self::size_align_pages(layout)?;
+        let order = nr_pages.ilog2() as usize;
+
+        todo!()
+    }
+
+    fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        todo!()
     }
 }
