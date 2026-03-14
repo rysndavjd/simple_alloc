@@ -2,7 +2,10 @@ use spin::Mutex;
 
 use crate::{
     ralloc::{PAGE_SHIFT, PAGE_SIZE},
-    std::{alloc::Layout, ptr::NonNull},
+    std::{
+        alloc::Layout,
+        ptr::{NonNull, slice_from_raw_parts_mut},
+    },
 };
 
 const fn max_order(heap_size: usize) -> usize {
@@ -140,14 +143,33 @@ impl<const NR_ORDER: usize> Buddy<NR_ORDER> {
         return Ok(());
     }
 
-    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, BuddyError> {
-        let nr_pages = Self::size_align_pages(layout)?;
+    /// Allocates `nr_pages` pages and returns a fat pointer.
+    /// The pointer is aligned to [`PAGE_SIZE`], and its [`len`] represents
+    /// the number of pages covered by the allocation.
+    fn allocate_page(&self, nr_pages: usize) -> Result<NonNull<[u8]>, BuddyError> {
         let order = nr_pages.ilog2() as usize;
 
+        {
+            let mut first_order = self.areas_list[order].lock();
+
+            if first_order.nr_free != 0 {
+                let chunk = first_order
+                    .pop()
+                    .expect("Source area should contain atleast 1 chunk");
+
+                unsafe {
+                    return Ok(NonNull::new_unchecked(slice_from_raw_parts_mut(
+                        chunk.as_ptr() as *mut u8,
+                        1 << order,
+                    )));
+                };
+            }
+        }
+        
         todo!()
     }
 
-    fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+    fn deallocate(&self, ptr: NonNull<[u8]>) {
         todo!()
     }
 }
