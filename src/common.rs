@@ -95,7 +95,7 @@ pub trait Initialization {
     fn is_initialized(&self) -> bool;
 
     /// # Safety
-    /// - `size` follows alignment requirement for implemented allocator.
+    /// - `start` follows alignment requirement for implemented allocator.
     /// - `size` not equal to zero.
     /// - `start` + `size` does not overflow [`usize::MAX`].
     unsafe fn init(&self, start: usize, size: usize);
