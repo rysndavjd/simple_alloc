@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "simple_bump"
+name = "simple_alloc"
 version = "0.1.0"
 dependencies = [
  "spin",

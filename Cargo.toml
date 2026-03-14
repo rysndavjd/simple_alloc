@@ -1,5 +1,5 @@
 [package]
-name = "simple_bump"
+name = "simple_alloc"
 description = " A collection of simple, pure Rust memory allocators."
 version = "0.1.0"
 edition = "2024"
