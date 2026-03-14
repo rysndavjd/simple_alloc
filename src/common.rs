@@ -16,24 +16,31 @@ pub const ALLOCATOR_UNINITIALIZED: &str = "Allocator is not initialized";
 pub const ALLOCATOR_ALREADY_INITIALIZED: &str = "Allocator was already initialized";
 pub const NULL_PTR: &str = "Null pointer was given";
 
+/// A list specifying allocator errors.
+/// This may later grow to include additional errors or reduced.
+#[non_exhaustive]
 pub enum AllocatorError {
+    /// Insufficient memory to allocate given object.
     Oom,
-    InternalOverflow,
+    /// Unable to satisfy alignment requirements for given [`layout`]
     Alignment(Layout),
+    /// Internal state of memory allocator has overflowed.
+    InternalOverflow,
 }
 
 impl Debug for AllocatorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             AllocatorError::Oom => write!(f, "Out of memory"),
-            AllocatorError::InternalOverflow => write!(f, "Overflowed memory allocator internals"),
             AllocatorError::Alignment(layout) => {
                 write!(f, "Unable to satisfy alignment requirement: {layout:?}")
             }
+            AllocatorError::InternalOverflow => write!(f, "Overflowed memory allocator internals"),
         }
     }
 }
 
+/// Generates `GlobalAlloc` implementation for given object.
 macro_rules! impl_global_alloc {
     ($t:ty) => {
         unsafe impl crate::std::alloc::GlobalAlloc for $t {
@@ -55,6 +62,7 @@ macro_rules! impl_global_alloc {
 pub(crate) use impl_global_alloc;
 
 #[cfg(feature = "allocator-api")]
+/// Generates `Allocator` implementation for given object.
 macro_rules! impl_allocator_api {
     ($t:ty) => {
         unsafe impl crate::std::alloc::Allocator for $t {
@@ -77,19 +85,30 @@ macro_rules! impl_allocator_api {
 pub(crate) use impl_allocator_api;
 
 pub trait Initialization {
+    /// Constructs an uninitialized allocator that
+    /// must be initialized via [`init`].
+    ///
+    /// [`init`]: #method.init
     fn new_uninitialized() -> Self;
 
+    /// Returns `true` if allocator is initialized.
     fn is_initialized(&self) -> bool;
 
     /// # Safety
+    /// - `size` follows alignment requirement for implemented allocator.
+    /// - `size` not equal to zero.
+    /// - `start` + `size` does not overflow [`usize::MAX`].
     unsafe fn init(&self, start: usize, size: usize);
 }
 
 pub trait Allocations {
+    /// Returns number of allocations currently allocated.
     fn allocations(&self) -> usize;
 }
 
 pub trait Bytes {
+    /// Returns number remaining bytes available in allocator.
     fn remaining_bytes(&self) -> usize;
+    /// Returns number bytes allocated in allocator.
     fn allocated_bytes(&self) -> usize;
 }

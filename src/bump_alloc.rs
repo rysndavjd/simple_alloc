@@ -26,17 +26,31 @@ struct Bump {
 pub struct BumpAlloc(UnsafeCell<Bump>);
 
 impl BumpAlloc {
-    fn get_inner(&self) -> &Bump {
+    /// # Safety
+    /// Caller must ensure that allocator has been initialized
+    /// else internal state will be invalid.
+    unsafe fn get_inner(&self) -> &Bump {
         unsafe { &*(self.0).get() }
     }
 
+    /// # Safety
+    /// The caller must guarantee the following:
+    ///
+    /// - The allocator has been initialized via [`BumpAlloc::init`].
+    /// - `layout` satisfies the invariants required by [`Layout::from_size_align`].
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocatorError> {
         debug_assert!(self.is_initialized(), "{ALLOCATOR_UNINITIALIZED}");
-        let alloc = self.get_inner();
+        let alloc = unsafe { self.get_inner() };
 
         if layout.size() == 0 {
             alloc.allocations.fetch_add(1, Ordering::AcqRel);
 
+            // SAFETY:
+            // Zero-sized allocations do not require backing memory.
+            // We construct a non-null dangling pointer using `layout`
+            // alignment as the address. `Layout::from_size_align` guarantees
+            // the alignment is non-zero, and the pointer will never be
+            // dereferenced because the slice length is zero.
             unsafe {
                 return Ok(NonNull::new_unchecked(slice_from_raw_parts_mut(
                     layout.align() as *mut u8,
@@ -88,7 +102,7 @@ impl BumpAlloc {
     /// this function. Calling reset while allocations are in use will
     /// cause undefined behavior.
     pub unsafe fn reset(&self) {
-        let alloc = self.get_inner();
+        let alloc = unsafe { self.get_inner() };
 
         alloc.next.store(alloc.start, Ordering::Release);
         alloc.allocations.store(0, Ordering::Release);
@@ -118,7 +132,7 @@ impl Initialization for BumpAlloc {
     }
 
     fn is_initialized(&self) -> bool {
-        let alloc = self.get_inner();
+        let alloc = unsafe { self.get_inner() };
 
         alloc.start != 0 && alloc.end != 0
     }
@@ -147,14 +161,14 @@ impl Initialization for BumpAlloc {
 
 impl Allocations for BumpAlloc {
     fn allocations(&self) -> usize {
-        let alloc = self.get_inner();
+        let alloc = unsafe { self.get_inner() };
         alloc.allocations.load(Ordering::Acquire)
     }
 }
 
 impl Bytes for BumpAlloc {
     fn remaining_bytes(&self) -> usize {
-        let alloc = self.get_inner();
+        let alloc = unsafe { self.get_inner() };
 
         let next = alloc.next.load(Ordering::Acquire);
 
@@ -162,7 +176,7 @@ impl Bytes for BumpAlloc {
     }
 
     fn allocated_bytes(&self) -> usize {
-        let alloc = self.get_inner();
+        let alloc = unsafe { self.get_inner() };
 
         let next = alloc.next.load(Ordering::Acquire);
 

@@ -165,7 +165,7 @@ impl<const NR_ORDER: usize> Buddy<NR_ORDER> {
                 };
             }
         }
-        
+
         todo!()
     }
 
