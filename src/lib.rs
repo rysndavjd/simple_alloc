@@ -1,3 +1,4 @@
+#![allow(clippy::needless_return)]
 #![cfg_attr(feature = "allocator-api", feature(allocator_api))]
 
 #[cfg(any(feature = "std", test))]

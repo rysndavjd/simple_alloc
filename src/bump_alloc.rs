@@ -109,7 +109,6 @@ impl BumpAlloc {
     }
 }
 
-unsafe impl Send for BumpAlloc {}
 unsafe impl Sync for BumpAlloc {}
 
 impl_global_alloc! {

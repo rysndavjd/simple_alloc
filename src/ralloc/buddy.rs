@@ -1,5 +1,3 @@
-use spin::Mutex;
-
 use crate::{
     ralloc::{PAGE_SHIFT, PAGE_SIZE},
     std::{
@@ -8,14 +6,13 @@ use crate::{
     },
 };
 
-const fn max_order(heap_size: usize) -> usize {
-    (heap_size / PAGE_SIZE).ilog2() as usize
-}
-
 enum BuddyError {
     OrderZeroCannotBeSplit,
+    OrderGreaterThanMax,
     SourceAreaEmpty,
+    SourceAreaMissingABuddy,
     InvalidLayout,
+    Oom,
 }
 
 struct Chunk {
@@ -40,6 +37,8 @@ impl Chunk {
     }
 }
 
+// Eventually use a red black tree for sorting
+// available pages in list of chunks
 struct Chunks {
     head: Option<NonNull<Chunk>>,
     nr_free: usize,
@@ -55,10 +54,28 @@ impl Chunks {
 
     fn push(&mut self, mut chunk: NonNull<Chunk>) {
         unsafe {
-            chunk.as_mut().next = self.head;
+            let chunk_addr = chunk.as_ref().start_addr();
+
+            let mut prev = None;
+            let mut curr = self.head;
+
+            while let Some(c) = curr {
+                if c.as_ref().start_addr() > chunk_addr {
+                    break;
+                }
+                prev = curr;
+                curr = c.as_ref().next;
+            }
+
+            chunk.as_mut().next = curr;
+
+            match prev {
+                None => self.head = Some(chunk),
+                Some(mut p) => p.as_mut().next = Some(chunk),
+            }
+
+            self.nr_free += 1;
         }
-        self.head = Some(chunk);
-        self.nr_free += 1;
     }
 
     fn pop(&mut self) -> Option<NonNull<Chunk>> {
@@ -79,7 +96,7 @@ impl Chunks {
 pub struct Buddy<const NR_ORDER: usize> {
     start: usize,
     size: usize,
-    areas_list: [Mutex<Chunks>; NR_ORDER],
+    areas_list: [Chunks; NR_ORDER],
 }
 
 impl<const NR_ORDER: usize> Buddy<NR_ORDER> {
@@ -97,27 +114,26 @@ impl<const NR_ORDER: usize> Buddy<NR_ORDER> {
     fn add_area(&mut self, addr: NonNull<u8>, order: usize) {
         assert!(addr.as_ptr() as usize & (PAGE_SIZE - 1) == 0);
 
-        let mut area = self.areas_list[order].lock();
-
         let mut new_chunk = Chunk::new();
-        new_chunk.next = area.head;
+        new_chunk.next = self.areas_list[order].head;
 
         let chunk_ptr = addr.as_ptr() as *mut Chunk;
 
         unsafe {
             chunk_ptr.write_volatile(new_chunk);
-            area.head = NonNull::new(chunk_ptr);
-            area.nr_free += 1;
+            self.areas_list[order].head = NonNull::new(chunk_ptr);
+            self.areas_list[order].nr_free += 1;
         }
     }
 
+    /// Takes `source_order` and splits that order into `source_order - 1`
     fn split_down(&mut self, source_order: usize) -> Result<(), BuddyError> {
         if source_order == 0 {
             return Err(BuddyError::OrderZeroCannotBeSplit);
         }
 
         let source_chunk = {
-            let mut source_area = self.areas_list[source_order].lock();
+            let source_area = &mut self.areas_list[source_order];
 
             if source_area.nr_free == 0 {
                 return Err(BuddyError::SourceAreaEmpty);
@@ -128,7 +144,7 @@ impl<const NR_ORDER: usize> Buddy<NR_ORDER> {
                 .expect("Source area should contain atleast 1 chunk")
         };
 
-        let mut target_area = self.areas_list[source_order - 1].lock();
+        let target_area = &mut self.areas_list[source_order - 1];
 
         unsafe {
             let buddy = NonNull::new_unchecked(
@@ -143,33 +159,77 @@ impl<const NR_ORDER: usize> Buddy<NR_ORDER> {
         return Ok(());
     }
 
-    /// Allocates `nr_pages` pages and returns a fat pointer.
-    /// The pointer is aligned to [`PAGE_SIZE`], and its [`len`] represents
-    /// the number of pages covered by the allocation.
-    fn allocate_page(&self, nr_pages: usize) -> Result<NonNull<[u8]>, BuddyError> {
-        let order = nr_pages.ilog2() as usize;
+    /// Takes `source_order` and combines two buddies if possible and adds it to `source_order + 1`
+    fn combine_up(&mut self, source_order: usize) -> Result<(), BuddyError> {
+        if source_order > NR_ORDER - 1 {
+            return Err(BuddyError::OrderGreaterThanMax);
+        }
 
-        {
-            let mut first_order = self.areas_list[order].lock();
+        if self.areas_list[source_order].nr_free < 2 {
+            return Err(BuddyError::SourceAreaMissingABuddy);
+        }
 
-            if first_order.nr_free != 0 {
-                let chunk = first_order
-                    .pop()
-                    .expect("Source area should contain atleast 1 chunk");
+        let head = self.areas_list[source_order]
+            .head
+            .expect("Source area should contain atleast 2 chunks, head");
+        let next = unsafe { head.as_ref().next }
+            .expect("Source area should contain atleast 2 chunks, next");
 
-                unsafe {
-                    return Ok(NonNull::new_unchecked(slice_from_raw_parts_mut(
-                        chunk.as_ptr() as *mut u8,
-                        1 << order,
-                    )));
-                };
+        unsafe {
+            if head.as_ref().buddy_addr(source_order) == next.as_ref().start_addr() {
+                let lower = self.areas_list[source_order].pop().unwrap();
+                self.areas_list[source_order].pop();
+                self.areas_list[source_order + 1].push(lower);
             }
         }
 
-        todo!()
+        Ok(())
     }
 
-    fn deallocate(&self, ptr: NonNull<[u8]>) {
+    /// Allocates `nr_pages` pages and returns a fat pointer.
+    /// The pointer is aligned to [`PAGE_SIZE`], and its [`len`] represents
+    /// the number of bytes covered by the allocation.
+    fn allocate_page(&mut self, nr_pages: usize) -> Result<NonNull<[u8]>, BuddyError> {
+        let alloc_order = nr_pages.next_power_of_two().ilog2() as usize;
+
+        if alloc_order > (NR_ORDER - 1) {
+            return Err(BuddyError::Oom);
+        }
+
+        let lowest_avail_order = (alloc_order..NR_ORDER)
+            .find(|&order| self.areas_list[order].nr_free > 0)
+            .ok_or(BuddyError::Oom)?;
+
+        if lowest_avail_order == alloc_order {
+            let chunk = self.areas_list[alloc_order]
+                .pop()
+                .expect("Source area should contain atleast 1 chunk");
+
+            unsafe {
+                return Ok(NonNull::new_unchecked(slice_from_raw_parts_mut(
+                    chunk.as_ptr() as *mut u8,
+                    PAGE_SIZE << alloc_order,
+                )));
+            };
+        }
+
+        for order in ((alloc_order + 1)..=lowest_avail_order).rev() {
+            self.split_down(order)?;
+        }
+
+        let chunk = self.areas_list[alloc_order]
+            .pop()
+            .expect("Source area should contain atleast 1 chunk");
+
+        unsafe {
+            return Ok(NonNull::new_unchecked(slice_from_raw_parts_mut(
+                chunk.as_ptr() as *mut u8,
+                PAGE_SIZE << alloc_order,
+            )));
+        };
+    }
+
+    fn deallocate_page(&self, ptr: NonNull<u8>, nr_pages: usize) {
         todo!()
     }
 }

@@ -1,9 +1,12 @@
 use spin::mutex::Mutex;
 
-use crate::{ralloc::buddy::Buddy, std::ptr::NonNull};
+use crate::{
+    common::AllocatorError,
+    ralloc::buddy::Buddy,
+    std::{alloc::Layout, ptr::NonNull},
+};
 
 mod buddy;
-mod utils;
 
 pub const PAGE_SIZE: usize = 4096;
 pub const PAGE_SHIFT: usize = 12;
@@ -22,7 +25,7 @@ enum SizeClass {
 
 impl SizeClass {
     /// Number of classes that has a bin for allocations
-    const NUM_BINNED: usize = 8;
+    const NR_BINNED: usize = 8;
 }
 
 enum AllocClass {
@@ -52,28 +55,40 @@ impl From<usize> for AllocClass {
         }
     }
 }
+
 struct FreeSlot {
     next: Option<NonNull<FreeSlot>>,
 }
 
-/// A page is a 4096 byte memory region with metadata attached to it.
-struct Page {
-    allocations: usize,
-    next: Option<NonNull<Page>>,
-    prev: Option<NonNull<Page>>,
+/// A free page is a 4096 byte memory region that
+/// how many free allocations are available and a
+/// free linked list doing lazy initialization for
+/// each allocated object.
+struct FreePage {
+    next: Option<NonNull<FreePage>>,
+    prev: Option<NonNull<FreePage>>,
+    free_allocations: usize,
     slots: Option<NonNull<FreeSlot>>,
 }
 
 /// A bin is a list of pages that contain a single size class of objects.
 struct Bin {
     class: SizeClass,
-    head: Option<NonNull<Page>>,
-    tail: Option<NonNull<Page>>,
+    head: Option<NonNull<FreePage>>,
+    tail: Option<NonNull<FreePage>>,
 }
 
 struct Ralloc<const NR_ORDER: usize> {
-    page_alloc: Buddy<NR_ORDER>,
-    bins: [Mutex<Bin>; SizeClass::NUM_BINNED],
+    page_alloc: Mutex<Buddy<NR_ORDER>>,
+    bins: [Mutex<Bin>; SizeClass::NR_BINNED],
 }
 
-// impl Ralloc {}
+impl<const NR_ORDER: usize> Ralloc<NR_ORDER> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocatorError> {
+        todo!()
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        todo!()
+    }
+}
